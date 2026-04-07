@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  approveRescheduleRequest,
   assignWorkerToBooking,
   clearBookingHistoryForRole,
   listAllBookings,
@@ -12,8 +13,15 @@ import { useToast } from "../../context/ToastContext.jsx";
 import LoadingPanel from "../../components/LoadingPanel.jsx";
 import StatusBadge from "../../components/StatusBadge.jsx";
 import { formatCurrency, formatDateTime } from "../../utils/formatters.js";
-import { BOOKING_FILTERS, getStatusesForBookingFilter, matchesBookingFilter } from "../../utils/bookingFilters.js";
-import { Trash2 } from "lucide-react";
+import {
+  BOOKING_FILTERS,
+  BOOKING_SORT_OPTIONS,
+  matchesBookingDate,
+  matchesBookingFilter,
+  matchesBookingSearch,
+  sortBookings,
+} from "../../utils/bookingFilters.js";
+import { Search, Trash2 } from "lucide-react";
 
 const STATUS_OPTIONS = ["pending", "assigned", "in_progress", "completed", "cancelled"];
 
@@ -24,6 +32,10 @@ export default function AdminBookingsPage() {
   const [workers, setWorkers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [dateFilter, setDateFilter] = useState("");
+  const [sortBy, setSortBy] = useState("latest");
+  const [approvingId, setApprovingId] = useState(null);
 
   useEffect(() => {
     async function load(showLoader = false) {
@@ -114,6 +126,28 @@ export default function AdminBookingsPage() {
     }
   }
 
+  async function handleApproveReschedule(booking) {
+    setApprovingId(booking.id);
+
+    try {
+      const updated = await approveRescheduleRequest(booking.id, profile?.name || "Admin");
+      setBookings((current) => current.map((item) => (item.id === booking.id ? updated : item)));
+      pushToast({
+        title: "Reschedule approved",
+        message: "The booking slot has been updated and everyone has been notified.",
+        type: "success",
+      });
+    } catch (error) {
+      pushToast({
+        title: "Approval failed",
+        message: error.message || "Unable to approve the reschedule request.",
+        type: "error",
+      });
+    } finally {
+      setApprovingId(null);
+    }
+  }
+
   async function handleClearHistory() {
     if (!filteredBookings.length) return;
 
@@ -123,10 +157,11 @@ export default function AdminBookingsPage() {
     try {
       const clearedCount = await clearBookingHistoryForRole({
         role: "admin",
-        statuses: getStatusesForBookingFilter(filter),
+        bookingIds: filteredBookings.map((booking) => booking.id),
       });
 
-      setBookings((current) => current.filter((booking) => !matchesBookingFilter(booking, filter)));
+      const hiddenIds = new Set(filteredBookings.map((booking) => booking.id));
+      setBookings((current) => current.filter((booking) => !hiddenIds.has(booking.id)));
       pushToast({
         title: "History cleaned",
         message: `${clearedCount || filteredBookings.length} booking record(s) were removed from the admin view.`,
@@ -141,7 +176,15 @@ export default function AdminBookingsPage() {
     }
   }
 
-  const filteredBookings = bookings.filter((booking) => matchesBookingFilter(booking, filter));
+  const filteredBookings = sortBookings(
+    bookings.filter(
+      (booking) =>
+        matchesBookingFilter(booking, filter) &&
+        matchesBookingSearch(booking, search) &&
+        matchesBookingDate(booking, dateFilter)
+    ),
+    sortBy
+  );
 
   if (loading) {
     return <LoadingPanel rows={5} />;
@@ -180,6 +223,39 @@ export default function AdminBookingsPage() {
             </button>
           ))}
         </div>
+
+        <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_220px]">
+          <div className="flex items-center gap-3 rounded-[24px] border border-white/8 bg-white/4 px-4 py-3">
+            <Search className="size-4 text-slate-500" />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-500"
+              placeholder="Search by service, address, requirement, or status"
+            />
+          </div>
+
+          <input
+            type="date"
+            value={dateFilter}
+            onChange={(event) => setDateFilter(event.target.value)}
+            className="input-shell w-full rounded-[24px] px-4 py-3"
+          />
+        </div>
+
+        <div className="mt-3 lg:max-w-[220px]">
+          <select
+            value={sortBy}
+            onChange={(event) => setSortBy(event.target.value)}
+            className="input-shell w-full rounded-[24px] px-4 py-3"
+          >
+            {BOOKING_SORT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                Sort: {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {filteredBookings.map((booking) => (
@@ -194,6 +270,25 @@ export default function AdminBookingsPage() {
               <p className="mt-3 text-sm leading-6 text-slate-500">{booking.address}</p>
               {booking.requirementDetails ? (
                 <p className="mt-4 text-sm leading-6 text-slate-400">{booking.requirementDetails}</p>
+              ) : null}
+              {booking.hasPendingReschedule ? (
+                <div className="mt-4 rounded-[24px] border border-amber-200/20 bg-amber-300/8 p-4">
+                  <p className="text-sm font-semibold text-amber-100">Pending reschedule request</p>
+                  <p className="mt-2 text-sm text-slate-200">
+                    Requested slot: {booking.rescheduleRequest?.requestedDate} at {booking.rescheduleRequest?.requestedTime}
+                  </p>
+                  <p className="mt-2 text-sm text-slate-300">
+                    Reason: {booking.rescheduleRequest?.reason || "No reason provided"}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => handleApproveReschedule(booking)}
+                    disabled={approvingId === booking.id}
+                    className="mt-4 rounded-2xl bg-gradient-to-r from-amber-300 to-orange-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {approvingId === booking.id ? "Applying..." : "Approve requested slot"}
+                  </button>
+                </div>
               ) : null}
             </div>
 

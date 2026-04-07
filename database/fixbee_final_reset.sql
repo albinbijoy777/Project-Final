@@ -39,6 +39,11 @@ drop table if exists public.services cascade;
 drop table if exists public.profiles cascade;
 
 drop function if exists public.seed_auth_user(text, text, text, text) cascade;
+drop function if exists public.approve_booking_reschedule_request(uuid, text) cascade;
+drop function if exists public.request_booking_reschedule_for_current_role(uuid, date, text, text, text) cascade;
+drop function if exists public.cancel_booking_for_current_role(uuid, text, text) cascade;
+drop function if exists public.clear_booking_history_for_role_items(text, uuid[]) cascade;
+drop function if exists public.clear_booking_history_for_current_role(text, text[]) cascade;
 drop function if exists public.handle_new_user() cascade;
 drop function if exists public.require_kristujayanti_email() cascade;
 drop function if exists public.is_admin() cascade;
@@ -49,41 +54,47 @@ drop function if exists public.new_uuid() cascade;
 do $$
 declare
   target_user_ids uuid[];
+  target_user_ids_text text[];
 begin
   select coalesce(array_agg(id), '{}'::uuid[])
   into target_user_ids
   from auth.users
   where lower(coalesce(email, '')) like '%@kristujayanti.com';
 
+  select coalesce(array_agg(id::text), '{}'::text[])
+  into target_user_ids_text
+  from auth.users
+  where lower(coalesce(email, '')) like '%@kristujayanti.com';
+
   if coalesce(array_length(target_user_ids, 1), 0) > 0 then
     if to_regclass('auth.mfa_challenges') is not null and to_regclass('auth.mfa_factors') is not null then
-      execute 'delete from auth.mfa_challenges where factor_id in (select id from auth.mfa_factors where user_id = any($1))'
-      using target_user_ids;
+      execute 'delete from auth.mfa_challenges where factor_id in (select id from auth.mfa_factors where user_id::text = any($1))'
+      using target_user_ids_text;
     end if;
 
     if to_regclass('auth.mfa_factors') is not null then
-      execute 'delete from auth.mfa_factors where user_id = any($1)'
-      using target_user_ids;
+      execute 'delete from auth.mfa_factors where user_id::text = any($1)'
+      using target_user_ids_text;
     end if;
 
     if to_regclass('auth.one_time_tokens') is not null then
-      execute 'delete from auth.one_time_tokens where user_id = any($1)'
-      using target_user_ids;
+      execute 'delete from auth.one_time_tokens where user_id::text = any($1)'
+      using target_user_ids_text;
     end if;
 
     if to_regclass('auth.sessions') is not null then
-      execute 'delete from auth.sessions where user_id = any($1)'
-      using target_user_ids;
+      execute 'delete from auth.sessions where user_id::text = any($1)'
+      using target_user_ids_text;
     end if;
 
     if to_regclass('auth.refresh_tokens') is not null then
-      execute 'delete from auth.refresh_tokens where user_id = any($1)'
-      using target_user_ids;
+      execute 'delete from auth.refresh_tokens where user_id::text = any($1)'
+      using target_user_ids_text;
     end if;
 
     if to_regclass('auth.identities') is not null then
-      execute 'delete from auth.identities where user_id = any($1)'
-      using target_user_ids;
+      execute 'delete from auth.identities where user_id::text = any($1)'
+      using target_user_ids_text;
     end if;
 
     delete from auth.users where id = any(target_user_ids);
@@ -246,9 +257,9 @@ as $$
   );
 $$;
 
-create or replace function public.clear_booking_history_for_current_role(
+create or replace function public.clear_booking_history_for_role_items(
   target_role text,
-  target_statuses text[] default null
+  target_booking_ids uuid[] default null
 )
 returns integer
 language plpgsql
@@ -269,11 +280,8 @@ begin
         updated_at = timezone('utc', now())
     where user_id = auth.uid()
       and hidden_for_user = false
-      and (
-        target_statuses is null
-        or coalesce(array_length(target_statuses, 1), 0) = 0
-        or status = any(target_statuses)
-      );
+      and coalesce(array_length(target_booking_ids, 1), 0) > 0
+      and id = any(target_booking_ids);
 
     get diagnostics affected_rows = row_count;
     return affected_rows;
@@ -285,11 +293,8 @@ begin
         updated_at = timezone('utc', now())
     where technician_id = auth.uid()
       and hidden_for_worker = false
-      and (
-        target_statuses is null
-        or coalesce(array_length(target_statuses, 1), 0) = 0
-        or status = any(target_statuses)
-      );
+      and coalesce(array_length(target_booking_ids, 1), 0) > 0
+      and id = any(target_booking_ids);
 
     get diagnostics affected_rows = row_count;
     return affected_rows;
@@ -304,11 +309,8 @@ begin
     set hidden_for_admin = true,
         updated_at = timezone('utc', now())
     where hidden_for_admin = false
-      and (
-        target_statuses is null
-        or coalesce(array_length(target_statuses, 1), 0) = 0
-        or status = any(target_statuses)
-      );
+      and coalesce(array_length(target_booking_ids, 1), 0) > 0
+      and id = any(target_booking_ids);
 
     get diagnostics affected_rows = row_count;
     return affected_rows;
@@ -317,6 +319,335 @@ begin
   raise exception 'Unsupported role value: %', target_role;
 end;
 $$;
+
+create or replace function public.cancel_booking_for_current_role(
+  target_booking_id uuid,
+  actor_label text default null,
+  cancellation_reason text default null
+)
+returns public.bookings
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_booking public.bookings;
+  actor_name text;
+  actor_role text;
+  next_note text := coalesce(nullif(trim(cancellation_reason), ''), 'No cancellation reason was provided.');
+  next_meta jsonb;
+begin
+  if auth.uid() is null then
+    raise exception 'Authentication required.';
+  end if;
+
+  select *
+  into target_booking
+  from public.bookings
+  where id = target_booking_id;
+
+  if target_booking.id is null then
+    raise exception 'Booking not found.';
+  end if;
+
+  if target_booking.status in ('completed', 'cancelled') then
+    raise exception 'This booking can no longer be cancelled.';
+  end if;
+
+  if target_booking.user_id = auth.uid() then
+    actor_role := 'user';
+  elsif target_booking.technician_id = auth.uid() then
+    actor_role := 'worker';
+  elsif public.is_admin() then
+    actor_role := 'admin';
+  else
+    raise exception 'You do not have access to cancel this booking.';
+  end if;
+
+  select coalesce(nullif(actor_label, ''), name, initcap(actor_role))
+  into actor_name
+  from public.profiles
+  where id = auth.uid();
+
+  next_meta := coalesce(target_booking.notes::jsonb, '{}'::jsonb);
+  next_meta := jsonb_set(
+    next_meta,
+    '{timeline}',
+    coalesce(next_meta -> 'timeline', '[]'::jsonb) || jsonb_build_array(
+      jsonb_build_object(
+        'id', public.new_uuid()::text,
+        'createdAt', timezone('utc', now())::text,
+        'actor', coalesce(actor_name, initcap(actor_role)),
+        'status', 'cancelled',
+        'title', 'Booking cancelled',
+        'note', next_note
+      )
+    ),
+    true
+  );
+
+  update public.bookings
+  set status = 'cancelled',
+      notes = next_meta::text,
+      updated_at = timezone('utc', now())
+  where id = target_booking_id
+  returning *
+  into target_booking;
+
+  insert into public.notifications (user_id, title, message, type)
+  select target_booking.user_id,
+         'Booking cancelled',
+         case
+           when actor_role = 'user' then 'You cancelled this booking. Reason: ' || next_note
+           else coalesce(actor_name, initcap(actor_role)) || ' cancelled your booking. Reason: ' || next_note
+         end,
+         'info'
+  where target_booking.user_id is not null;
+
+  insert into public.notifications (user_id, title, message, type)
+  select target_booking.technician_id,
+         'Booking cancelled',
+         case
+           when actor_role = 'worker' then 'You cancelled this assignment. Reason: ' || next_note
+           else coalesce(actor_name, initcap(actor_role)) || ' cancelled the assignment. Reason: ' || next_note
+         end,
+         'info'
+  where target_booking.technician_id is not null
+    and target_booking.technician_id <> target_booking.user_id;
+
+  return target_booking;
+end;
+$$;
+
+create or replace function public.request_booking_reschedule_for_current_role(
+  target_booking_id uuid,
+  requested_service_date date,
+  requested_service_time text,
+  actor_label text default null,
+  request_reason text default null
+)
+returns public.bookings
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_booking public.bookings;
+  actor_name text;
+  actor_role text;
+  next_note text := coalesce(nullif(trim(request_reason), ''), 'No reschedule reason was provided.');
+  next_meta jsonb;
+begin
+  if auth.uid() is null then
+    raise exception 'Authentication required.';
+  end if;
+
+  select *
+  into target_booking
+  from public.bookings
+  where id = target_booking_id;
+
+  if target_booking.id is null then
+    raise exception 'Booking not found.';
+  end if;
+
+  if target_booking.status in ('completed', 'cancelled') then
+    raise exception 'This booking can no longer be rescheduled.';
+  end if;
+
+  if target_booking.user_id = auth.uid() then
+    actor_role := 'user';
+  elsif target_booking.technician_id = auth.uid() then
+    actor_role := 'worker';
+  else
+    raise exception 'You do not have access to request a reschedule for this booking.';
+  end if;
+
+  select coalesce(nullif(actor_label, ''), name, initcap(actor_role))
+  into actor_name
+  from public.profiles
+  where id = auth.uid();
+
+  next_meta := coalesce(target_booking.notes::jsonb, '{}'::jsonb);
+  next_meta := jsonb_set(
+    next_meta,
+    '{rescheduleRequest}',
+    jsonb_build_object(
+      'status', 'pending',
+      'requestedBy', actor_role,
+      'actorLabel', coalesce(actor_name, initcap(actor_role)),
+      'requestedDate', requested_service_date::text,
+      'requestedTime', trim(requested_service_time),
+      'reason', next_note,
+      'requestedAt', timezone('utc', now())::text
+    ),
+    true
+  );
+
+  next_meta := jsonb_set(
+    next_meta,
+    '{timeline}',
+    coalesce(next_meta -> 'timeline', '[]'::jsonb) || jsonb_build_array(
+      jsonb_build_object(
+        'id', public.new_uuid()::text,
+        'createdAt', timezone('utc', now())::text,
+        'actor', coalesce(actor_name, initcap(actor_role)),
+        'status', 'reschedule_requested',
+        'title', 'Reschedule requested',
+        'note', 'Requested new slot: ' || requested_service_date::text || ' at ' || trim(requested_service_time) || '. Reason: ' || next_note
+      )
+    ),
+    true
+  );
+
+  update public.bookings
+  set notes = next_meta::text,
+      updated_at = timezone('utc', now())
+  where id = target_booking_id
+  returning *
+  into target_booking;
+
+  insert into public.notifications (user_id, title, message, type)
+  select id,
+         'Reschedule request',
+         coalesce(actor_name, initcap(actor_role)) || ' requested to move ' || target_booking.service || ' to ' || requested_service_date::text || ' at ' || trim(requested_service_time) || '. Reason: ' || next_note,
+         'info'
+  from public.profiles
+  where role = 'admin';
+
+  insert into public.notifications (user_id, title, message, type)
+  select target_booking.user_id,
+         'Reschedule requested',
+         case
+           when actor_role = 'user' then 'Your reschedule request was sent to admin for approval.'
+           else coalesce(actor_name, initcap(actor_role)) || ' requested a new slot for your booking: ' || requested_service_date::text || ' at ' || trim(requested_service_time) || '.'
+         end,
+         'info'
+  where target_booking.user_id is not null;
+
+  insert into public.notifications (user_id, title, message, type)
+  select target_booking.technician_id,
+         'Reschedule requested',
+         case
+           when actor_role = 'worker' then 'Your reschedule request was sent to admin for approval.'
+           else coalesce(actor_name, initcap(actor_role)) || ' requested a new slot for this assignment: ' || requested_service_date::text || ' at ' || trim(requested_service_time) || '.'
+         end,
+         'info'
+  where target_booking.technician_id is not null
+    and target_booking.technician_id <> target_booking.user_id;
+
+  return target_booking;
+end;
+$$;
+
+create or replace function public.approve_booking_reschedule_request(
+  target_booking_id uuid,
+  actor_label text default null
+)
+returns public.bookings
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_booking public.bookings;
+  actor_name text;
+  request_payload jsonb;
+  next_meta jsonb;
+  next_date date;
+  next_time text;
+begin
+  if auth.uid() is null then
+    raise exception 'Authentication required.';
+  end if;
+
+  if not public.is_admin() then
+    raise exception 'Admin access required.';
+  end if;
+
+  select *
+  into target_booking
+  from public.bookings
+  where id = target_booking_id;
+
+  if target_booking.id is null then
+    raise exception 'Booking not found.';
+  end if;
+
+  next_meta := coalesce(target_booking.notes::jsonb, '{}'::jsonb);
+  request_payload := next_meta -> 'rescheduleRequest';
+
+  if request_payload is null or coalesce(request_payload ->> 'status', '') <> 'pending' then
+    raise exception 'No pending reschedule request was found for this booking.';
+  end if;
+
+  next_date := (request_payload ->> 'requestedDate')::date;
+  next_time := request_payload ->> 'requestedTime';
+
+  select coalesce(nullif(actor_label, ''), name, 'Admin')
+  into actor_name
+  from public.profiles
+  where id = auth.uid();
+
+  next_meta := jsonb_set(
+    next_meta,
+    '{rescheduleRequest}',
+    request_payload || jsonb_build_object(
+      'status', 'approved',
+      'approvedAt', timezone('utc', now())::text,
+      'approvedBy', coalesce(actor_name, 'Admin')
+    ),
+    true
+  );
+
+  next_meta := jsonb_set(
+    next_meta,
+    '{timeline}',
+    coalesce(next_meta -> 'timeline', '[]'::jsonb) || jsonb_build_array(
+      jsonb_build_object(
+        'id', public.new_uuid()::text,
+        'createdAt', timezone('utc', now())::text,
+        'actor', coalesce(actor_name, 'Admin'),
+        'status', 'assigned',
+        'title', 'Reschedule approved',
+        'note', 'Booking moved to ' || next_date::text || ' at ' || next_time || '.'
+      )
+    ),
+    true
+  );
+
+  update public.bookings
+  set service_date = next_date,
+      service_time = next_time,
+      notes = next_meta::text,
+      updated_at = timezone('utc', now())
+  where id = target_booking_id
+  returning *
+  into target_booking;
+
+  insert into public.notifications (user_id, title, message, type)
+  select target_booking.user_id,
+         'Reschedule approved',
+         'Your booking was moved to ' || next_date::text || ' at ' || next_time || '.',
+         'success'
+  where target_booking.user_id is not null;
+
+  insert into public.notifications (user_id, title, message, type)
+  select target_booking.technician_id,
+         'Reschedule approved',
+         'This assignment was moved to ' || next_date::text || ' at ' || next_time || '.',
+         'success'
+  where target_booking.technician_id is not null
+    and target_booking.technician_id <> target_booking.user_id;
+
+  return target_booking;
+end;
+$$;
+
+grant execute on function public.clear_booking_history_for_role_items(text, uuid[]) to authenticated, service_role;
+grant execute on function public.cancel_booking_for_current_role(uuid, text, text) to authenticated, service_role;
+grant execute on function public.request_booking_reschedule_for_current_role(uuid, date, text, text, text) to authenticated, service_role;
+grant execute on function public.approve_booking_reschedule_request(uuid, text) to authenticated, service_role;
 
 create or replace function public.handle_new_user()
 returns trigger

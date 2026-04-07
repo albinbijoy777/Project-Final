@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, ClipboardList, PlayCircle, TimerReset, Trash2 } from "lucide-react";
+import { CheckCircle2, ClipboardList, PlayCircle, Search, TimerReset, Trash2 } from "lucide-react";
 import {
+  cancelBookingForCurrentRole,
   clearBookingHistoryForRole,
   listWorkerBookings,
+  requestBookingRescheduleForCurrentRole,
   subscribeToTable,
   updateBookingStatus,
 } from "../../services/platformService.js";
@@ -12,7 +14,15 @@ import LoadingPanel from "../../components/LoadingPanel.jsx";
 import StatCard from "../../components/StatCard.jsx";
 import StatusBadge from "../../components/StatusBadge.jsx";
 import { formatDateTime } from "../../utils/formatters.js";
-import { BOOKING_FILTERS, getStatusesForBookingFilter, matchesBookingFilter } from "../../utils/bookingFilters.js";
+import {
+  BOOKING_FILTERS,
+  BOOKING_SORT_OPTIONS,
+  matchesBookingDate,
+  matchesBookingFilter,
+  matchesBookingSearch,
+  sortBookings,
+} from "../../utils/bookingFilters.js";
+import { collectRescheduleRequest } from "../../utils/bookingActions.js";
 
 const NEXT_ACTIONS = {
   pending: "in_progress",
@@ -27,6 +37,10 @@ export default function WorkerOverviewPage() {
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState(null);
   const [filter, setFilter] = useState("booked");
+  const [search, setSearch] = useState("");
+  const [dateFilter, setDateFilter] = useState("");
+  const [sortBy, setSortBy] = useState("latest");
+  const [reschedulingId, setReschedulingId] = useState(null);
 
   useEffect(() => {
     if (!user?.id) return undefined;
@@ -88,10 +102,11 @@ export default function WorkerOverviewPage() {
     try {
       const clearedCount = await clearBookingHistoryForRole({
         role: "worker",
-        statuses: getStatusesForBookingFilter(filter),
+        bookingIds: filteredBookings.map((booking) => booking.id),
       });
 
-      setBookings((current) => current.filter((booking) => !matchesBookingFilter(booking, filter)));
+      const hiddenIds = new Set(filteredBookings.map((booking) => booking.id));
+      setBookings((current) => current.filter((booking) => !hiddenIds.has(booking.id)));
       pushToast({
         title: "History cleaned",
         message: `${clearedCount || filteredBookings.length} worker record(s) were removed from your view.`,
@@ -106,10 +121,73 @@ export default function WorkerOverviewPage() {
     }
   }
 
+  async function handleCancelBooking(booking) {
+    const reason = window.prompt("Why are you cancelling this assignment?", "");
+    if (reason === null) return;
+
+    setUpdatingId(booking.id);
+
+    try {
+      const updated = await cancelBookingForCurrentRole(booking.id, profile?.name || "Worker", reason);
+      setBookings((current) => current.map((item) => (item.id === booking.id ? updated : item)));
+      pushToast({
+        title: "Assignment cancelled",
+        message: "The user has been notified about the cancellation.",
+        type: "success",
+      });
+    } catch (error) {
+      pushToast({
+        title: "Cancellation failed",
+        message: error.message || "Unable to cancel this assignment right now.",
+        type: "error",
+      });
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
+  async function handleRescheduleRequest(booking) {
+    try {
+      const request = collectRescheduleRequest(booking.service_date, booking.service_time);
+      if (!request) return;
+
+      setReschedulingId(booking.id);
+      const updated = await requestBookingRescheduleForCurrentRole(
+        booking.id,
+        profile?.name || "Worker",
+        request.requestedDate,
+        request.requestedTime,
+        request.reason
+      );
+      setBookings((current) => current.map((item) => (item.id === booking.id ? updated : item)));
+      pushToast({
+        title: "Reschedule requested",
+        message: "The new slot was sent to admin for approval.",
+        type: "success",
+      });
+    } catch (error) {
+      pushToast({
+        title: "Request failed",
+        message: error.message || "Unable to request a new slot right now.",
+        type: "error",
+      });
+    } finally {
+      setReschedulingId(null);
+    }
+  }
+
   const activeBookings = bookings.filter((booking) => booking.status !== "completed");
   const completedBookings = bookings.filter((booking) => booking.status === "completed");
   const pendingBookings = bookings.filter((booking) => ["pending", "assigned"].includes(booking.status));
-  const filteredBookings = bookings.filter((booking) => matchesBookingFilter(booking, filter));
+  const filteredBookings = sortBookings(
+    bookings.filter(
+      (booking) =>
+        matchesBookingFilter(booking, filter) &&
+        matchesBookingSearch(booking, search) &&
+        matchesBookingDate(booking, dateFilter)
+    ),
+    sortBy
+  );
 
   if (loading) {
     return <LoadingPanel rows={4} />;
@@ -175,6 +253,39 @@ export default function WorkerOverviewPage() {
                 </button>
               ))}
             </div>
+
+            <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_220px]">
+              <div className="flex items-center gap-3 rounded-[24px] border border-white/8 bg-white/4 px-4 py-3">
+                <Search className="size-4 text-slate-500" />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-500"
+                  placeholder="Search by service, address, requirement, or status"
+                />
+              </div>
+
+              <input
+                type="date"
+                value={dateFilter}
+                onChange={(event) => setDateFilter(event.target.value)}
+                className="input-shell w-full rounded-[24px] px-4 py-3"
+              />
+            </div>
+
+            <div className="mt-3 lg:max-w-[220px]">
+              <select
+                value={sortBy}
+                onChange={(event) => setSortBy(event.target.value)}
+                className="input-shell w-full rounded-[24px] px-4 py-3"
+              >
+                {BOOKING_SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    Sort: {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {filteredBookings.length ? (
@@ -193,6 +304,11 @@ export default function WorkerOverviewPage() {
                       {booking.requirementDetails ? (
                         <p className="mt-4 text-sm leading-6 text-slate-400">{booking.requirementDetails}</p>
                       ) : null}
+                      {booking.hasPendingReschedule ? (
+                        <div className="mt-4 rounded-[22px] border border-amber-200/20 bg-amber-300/8 px-4 py-3 text-sm text-amber-100">
+                          Requested slot: {booking.rescheduleRequest?.requestedDate} at {booking.rescheduleRequest?.requestedTime}
+                        </div>
+                      ) : null}
                     </div>
 
                     <div className="flex min-w-[220px] flex-col gap-3">
@@ -208,6 +324,30 @@ export default function WorkerOverviewPage() {
                             : nextStatus === "completed"
                               ? "Mark completed"
                               : "Start job"}
+                        </button>
+                      ) : null}
+                      {!["completed", "cancelled"].includes(booking.status) ? (
+                        <button
+                          type="button"
+                          onClick={() => handleRescheduleRequest(booking)}
+                          disabled={reschedulingId === booking.id || booking.hasPendingReschedule}
+                          className="rounded-2xl border border-amber-200/20 bg-amber-300/8 px-4 py-3 text-sm font-semibold text-amber-100 transition hover:bg-amber-300/12 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {reschedulingId === booking.id
+                            ? "Sending..."
+                            : booking.hasPendingReschedule
+                              ? "Request pending"
+                              : "Request reschedule"}
+                        </button>
+                      ) : null}
+                      {!["completed", "cancelled"].includes(booking.status) ? (
+                        <button
+                          type="button"
+                          onClick={() => handleCancelBooking(booking)}
+                          disabled={updatingId === booking.id}
+                          className="rounded-2xl border border-rose-200/15 bg-rose-400/8 px-4 py-3 text-sm font-semibold text-rose-100 transition hover:bg-rose-400/12 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {updatingId === booking.id ? "Updating..." : "Cancel assignment"}
                         </button>
                       ) : null}
                     </div>

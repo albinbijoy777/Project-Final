@@ -1,4 +1,4 @@
-import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { LayoutDashboard, LogOut, Menu, X } from "lucide-react";
 import { useState } from "react";
 import { motion as Motion } from "framer-motion";
@@ -29,6 +29,7 @@ export default function DashboardLayout({ role, title, subtitle, navItems, onAva
   const { profile, logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
   const theme = THEME[role] || THEME.user;
 
   async function handleLogout() {
@@ -36,7 +37,7 @@ export default function DashboardLayout({ role, title, subtitle, navItems, onAva
       await logout();
     } finally {
       setSidebarOpen(false);
-      window.location.replace("/login");
+      navigate("/login", { replace: true });
     }
   }
 
@@ -181,7 +182,7 @@ function SidebarContent({ role, profile, navItems, onAvatarUpload }) {
               className={({ isActive }) =>
                 `flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition ${
                   isActive
-                    ? "bg-white text-slate-950 shadow-lg shadow-amber-300/10"
+                    ? "bg-amber-200 text-[#2c1d0d] shadow-lg shadow-amber-300/15"
                     : "text-slate-300 hover:bg-white/6 hover:text-white"
                 }`
               }

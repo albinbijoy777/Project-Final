@@ -1,12 +1,19 @@
 import { useEffect, useState } from "react";
-import { Download, Trash2 } from "lucide-react";
+import { Download, Search, Trash2 } from "lucide-react";
 import { clearBookingHistoryForRole, listWorkerBookings, subscribeToTable } from "../../services/platformService.js";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
 import LoadingPanel from "../../components/LoadingPanel.jsx";
 import { downloadCsv } from "../../utils/exporters.js";
 import { formatCurrency, formatDateTime } from "../../utils/formatters.js";
-import { BOOKING_FILTERS, getStatusesForBookingFilter, matchesBookingFilter } from "../../utils/bookingFilters.js";
+import {
+  BOOKING_FILTERS,
+  BOOKING_SORT_OPTIONS,
+  matchesBookingDate,
+  matchesBookingFilter,
+  matchesBookingSearch,
+  sortBookings,
+} from "../../utils/bookingFilters.js";
 
 export default function WorkerHistoryPage() {
   const { user } = useAuth();
@@ -14,6 +21,9 @@ export default function WorkerHistoryPage() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("completed");
+  const [search, setSearch] = useState("");
+  const [dateFilter, setDateFilter] = useState("");
+  const [sortBy, setSortBy] = useState("latest");
 
   useEffect(() => {
     if (!user?.id) return undefined;
@@ -65,10 +75,11 @@ export default function WorkerHistoryPage() {
     try {
       const clearedCount = await clearBookingHistoryForRole({
         role: "worker",
-        statuses: getStatusesForBookingFilter(filter),
+        bookingIds: filteredHistory.map((booking) => booking.id),
       });
 
-      setHistory((current) => current.filter((booking) => !matchesBookingFilter(booking, filter)));
+      const hiddenIds = new Set(filteredHistory.map((booking) => booking.id));
+      setHistory((current) => current.filter((booking) => !hiddenIds.has(booking.id)));
       pushToast({
         title: "History cleaned",
         message: `${clearedCount || filteredHistory.length} worker record(s) were removed from your history view.`,
@@ -83,7 +94,15 @@ export default function WorkerHistoryPage() {
     }
   }
 
-  const filteredHistory = history.filter((booking) => matchesBookingFilter(booking, filter));
+  const filteredHistory = sortBookings(
+    history.filter(
+      (booking) =>
+        matchesBookingFilter(booking, filter) &&
+        matchesBookingSearch(booking, search) &&
+        matchesBookingDate(booking, dateFilter)
+    ),
+    sortBy
+  );
 
   if (loading) {
     return <LoadingPanel rows={4} />;
@@ -131,6 +150,39 @@ export default function WorkerHistoryPage() {
               {item.label}
             </button>
           ))}
+        </div>
+
+        <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_220px]">
+          <div className="flex items-center gap-3 rounded-[24px] border border-white/8 bg-white/4 px-4 py-3">
+            <Search className="size-4 text-slate-500" />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-500"
+              placeholder="Search by service, address, or status"
+            />
+          </div>
+
+          <input
+            type="date"
+            value={dateFilter}
+            onChange={(event) => setDateFilter(event.target.value)}
+            className="input-shell w-full rounded-[24px] px-4 py-3"
+          />
+        </div>
+
+        <div className="mt-3 lg:max-w-[220px]">
+          <select
+            value={sortBy}
+            onChange={(event) => setSortBy(event.target.value)}
+            className="input-shell w-full rounded-[24px] px-4 py-3"
+          >
+            {BOOKING_SORT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                Sort: {option.label}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 

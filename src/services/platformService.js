@@ -77,6 +77,7 @@ function normalizeService(record) {
 function normalizeBooking(record) {
   const meta = parseBookingMeta(record?.notes);
   const blueprint = findServiceBlueprint(meta?.serviceSlug || record?.service);
+  const rescheduleRequest = meta?.rescheduleRequest || null;
 
   return {
     ...record,
@@ -91,6 +92,8 @@ function normalizeBooking(record) {
     urgency: meta?.urgency || "standard",
     location: meta?.location || record?.address || "",
     serviceSlug: meta?.serviceSlug || blueprint?.slug || null,
+    rescheduleRequest,
+    hasPendingReschedule: rescheduleRequest?.status === "pending",
   };
 }
 
@@ -420,6 +423,64 @@ export async function updateBookingStatus(bookingId, status, actorLabel) {
   return normalizeBooking(data);
 }
 
+export async function cancelBookingForCurrentRole(bookingId, actorLabel, reason) {
+  const { data, error } = await supabase.rpc("cancel_booking_for_current_role", {
+    target_booking_id: bookingId,
+    actor_label: actorLabel || null,
+    cancellation_reason: reason || null,
+  });
+
+  if (error) {
+    if (/cancel_booking_for_current_role|does not exist/i.test(error.message)) {
+      throw new Error("Run fixbee_history_notifications_patch.sql in Supabase first.");
+    }
+
+    throw new Error(error.message);
+  }
+
+  const nextBooking = Array.isArray(data) ? data[0] : data;
+  return normalizeBooking(nextBooking);
+}
+
+export async function requestBookingRescheduleForCurrentRole(bookingId, actorLabel, nextDate, nextTime, reason) {
+  const { data, error } = await supabase.rpc("request_booking_reschedule_for_current_role", {
+    target_booking_id: bookingId,
+    requested_service_date: nextDate,
+    requested_service_time: nextTime,
+    actor_label: actorLabel || null,
+    request_reason: reason || null,
+  });
+
+  if (error) {
+    if (/request_booking_reschedule_for_current_role|does not exist/i.test(error.message)) {
+      throw new Error("Run fixbee_history_notifications_patch.sql in Supabase first.");
+    }
+
+    throw new Error(error.message);
+  }
+
+  const nextBooking = Array.isArray(data) ? data[0] : data;
+  return normalizeBooking(nextBooking);
+}
+
+export async function approveRescheduleRequest(bookingId, actorLabel) {
+  const { data, error } = await supabase.rpc("approve_booking_reschedule_request", {
+    target_booking_id: bookingId,
+    actor_label: actorLabel || null,
+  });
+
+  if (error) {
+    if (/approve_booking_reschedule_request|does not exist/i.test(error.message)) {
+      throw new Error("Run fixbee_history_notifications_patch.sql in Supabase first.");
+    }
+
+    throw new Error(error.message);
+  }
+
+  const nextBooking = Array.isArray(data) ? data[0] : data;
+  return normalizeBooking(nextBooking);
+}
+
 export async function assignWorkerToBooking(bookingId, workerId, adminLabel = "admin") {
   const current = await getBookingById(bookingId);
   const workers = await listProfiles("worker");
@@ -527,14 +588,14 @@ export async function markNotificationRead(notificationId) {
   return true;
 }
 
-export async function clearBookingHistoryForRole({ role, statuses = null }) {
-  const { data, error } = await supabase.rpc("clear_booking_history_for_current_role", {
+export async function clearBookingHistoryForRole({ role, bookingIds = null }) {
+  const { data, error } = await supabase.rpc("clear_booking_history_for_role_items", {
     target_role: role,
-    target_statuses: statuses?.length ? statuses : null,
+    target_booking_ids: bookingIds?.length ? bookingIds : null,
   });
 
   if (error) {
-    if (/clear_booking_history_for_current_role|does not exist/i.test(error.message)) {
+    if (/clear_booking_history_for_role_items|does not exist/i.test(error.message)) {
       throw new Error("Run fixbee_history_notifications_patch.sql in Supabase first.");
     }
 
