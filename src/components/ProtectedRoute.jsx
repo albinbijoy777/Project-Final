@@ -1,45 +1,24 @@
-import { Navigate, Outlet } from "react-router-dom"
-import { useEffect, useState } from "react"
-import { supabase } from "../services/supabase"
+import { Navigate, Outlet, useLocation } from "react-router-dom";
+import { useAuth } from "../context/AuthContext.jsx";
 
-export default function ProtectedRoute(){
+export default function ProtectedRoute() {
+  const { user, loading } = useAuth();
+  const location = useLocation();
 
-const [user,setUser] = useState(null)
-const [loading,setLoading] = useState(true)
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-6">
+        <div className="flex items-center gap-3 rounded-full border border-white/10 bg-slate-950/70 px-5 py-3 text-sm text-slate-300">
+          <div className="size-4 animate-spin rounded-full border-2 border-white/15 border-t-amber-200" />
+          Checking your session...
+        </div>
+      </div>
+    );
+  }
 
-useEffect(()=>{
+  if (!user) {
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
 
-async function checkUser(){
-
-const { data } = await supabase.auth.getUser()
-
-setUser(data?.user ?? null)
-setLoading(false)
-
-}
-
-checkUser()
-
-},[])
-
-
-
-if(loading){
-
-return <div className="p-10 text-center">Loading...</div>
-
-}
-
-
-
-if(!user){
-
-return <Navigate to="/login"/>
-
-}
-
-
-
-return <Outlet/>
-
+  return <Outlet />;
 }
