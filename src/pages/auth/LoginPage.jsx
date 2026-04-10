@@ -199,9 +199,9 @@ export default function LoginPage() {
                   <label className="block text-sm text-slate-300" htmlFor="password">
                     Password
                   </label>
-                  <Link to="/forgot-password" className="text-sm text-amber-200 transition hover:text-amber-100">
+                  {/*<Link to="/forgot-password" className="text-sm text-amber-200 transition hover:text-amber-100">
                     Forgot password?
-                  </Link>
+                  </Link>*/}
                 </div>
                 <input
                   ref={passwordRef}

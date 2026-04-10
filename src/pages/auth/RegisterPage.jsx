@@ -101,7 +101,7 @@ export default function RegisterPage() {
                 key={role.value}
                 type="button"
                 onClick={() => setForm((current) => ({ ...current, role: role.value }))}
-                className={`w-full rounded-[24px] border p-4 text-left transition ${
+                className={`w-full rounded-3xl border p-4 text-left transition ${
                   form.role === role.value
                     ? "border-amber-200/20 bg-amber-300/8"
                     : "border-white/8 bg-white/4 hover:bg-white/6"

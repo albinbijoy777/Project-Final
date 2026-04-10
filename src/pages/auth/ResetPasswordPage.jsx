@@ -125,7 +125,7 @@ export default function ResetPasswordPage() {
             <button
               type="submit"
               disabled={submitting}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-300 to-emerald-300 px-4 py-3.5 text-sm font-semibold text-slate-950 transition hover:brightness-105 disabled:opacity-70"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-linear-to-r from-amber-300 to-emerald-300 px-4 py-3.5 text-sm font-semibold text-slate-950 transition hover:brightness-105 disabled:opacity-70"
             >
               {submitting ? "Saving..." : "Save new password"}
               <ArrowRight className="size-4" />
