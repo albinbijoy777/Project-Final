@@ -78,6 +78,21 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  const applySessionState = useCallback((nextSession) => {
+    const nextUser = nextSession?.user || null;
+
+    setSession(nextSession);
+    setUser(nextUser);
+
+    if (!nextUser) {
+      setProfile(null);
+      return null;
+    }
+
+    setProfile((currentProfile) => buildFallbackProfile(nextUser, currentProfile));
+    return nextUser;
+  }, []);
+
   useEffect(() => {
     let active = true;
 
@@ -86,12 +101,15 @@ export function AuthProvider({ children }) {
         const nextSession = await getCurrentSession();
         if (!active) return;
 
-        setSession(nextSession);
-        setUser(nextSession?.user || null);
-
-        if (nextSession?.user) {
-          await refreshProfile(nextSession.user);
+        const nextUser = applySessionState(nextSession);
+        if (nextUser) {
+          void refreshProfile(nextUser);
         }
+      } catch {
+        if (!active) return;
+        setSession(null);
+        setUser(null);
+        setProfile(null);
       } finally {
         if (active) {
           setLoading(false);
@@ -103,26 +121,22 @@ export function AuthProvider({ children }) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
-      try {
-        setSession(nextSession);
-        setUser(nextSession?.user || null);
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (!active) return;
 
-        if (nextSession?.user) {
-          await refreshProfile(nextSession.user);
-        } else {
-          setProfile(null);
-        }
-      } finally {
-        setLoading(false);
+      const nextUser = applySessionState(nextSession);
+      if (nextUser) {
+        void refreshProfile(nextUser);
       }
+
+      setLoading(false);
     });
 
     return () => {
       active = false;
       subscription.unsubscribe();
     };
-  }, [refreshProfile]);
+  }, [applySessionState, refreshProfile]);
 
   useEffect(() => {
     if (!user?.id) return undefined;

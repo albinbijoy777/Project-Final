@@ -6,7 +6,7 @@ import { getDashboardPath } from "../utils/routes.js";
 export default function RoleRoute({ allowedRoles }) {
   const { profile, loading, user } = useAuth();
 
-  if (loading || (user && !profile)) {
+  if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center px-6">
         <div className="flex items-center gap-3 rounded-full border border-white/10 bg-slate-950/70 px-5 py-3 text-sm text-slate-300">
@@ -21,7 +21,7 @@ export default function RoleRoute({ allowedRoles }) {
     return <Navigate to="/login" replace />;
   }
 
-  const currentRole = normalizeRole(profile?.role);
+  const currentRole = normalizeRole(profile?.role || user?.user_metadata?.role || "user");
   const allowed = allowedRoles.map((role) => normalizeRole(role));
 
   if (!allowed.includes(currentRole)) {

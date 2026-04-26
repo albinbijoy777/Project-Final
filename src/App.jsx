@@ -157,7 +157,7 @@ export default function App() {
 function RootRedirect() {
   const { user, profile, loading } = useAuth();
 
-  if (loading || (user && !profile)) {
+  if (loading) {
     return <AppBoot />;
   }
 
@@ -165,18 +165,18 @@ function RootRedirect() {
     return <Navigate to="/login" replace />;
   }
 
-  return <Navigate to={getDashboardPath(profile?.role)} replace />;
+  return <Navigate to={getDashboardPath(profile?.role || user?.user_metadata?.role)} replace />;
 }
 
 function GuestGate({ children }) {
   const { user, profile, loading } = useAuth();
 
-  if (loading || (user && !profile)) {
+  if (loading) {
     return <AppBoot />;
   }
 
   if (user) {
-    return <Navigate to={getDashboardPath(profile?.role)} replace />;
+    return <Navigate to={getDashboardPath(profile?.role || user?.user_metadata?.role)} replace />;
   }
 
   return children;
