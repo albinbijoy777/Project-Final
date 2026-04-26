@@ -80,11 +80,6 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     let active = true;
-    const loadingFailSafe = window.setTimeout(() => {
-      if (active) {
-        setLoading(false);
-      }
-    }, 2500);
 
     async function hydrate() {
       try {
@@ -98,7 +93,6 @@ export function AuthProvider({ children }) {
           await refreshProfile(nextSession.user);
         }
       } finally {
-        window.clearTimeout(loadingFailSafe);
         if (active) {
           setLoading(false);
         }
@@ -126,7 +120,6 @@ export function AuthProvider({ children }) {
 
     return () => {
       active = false;
-      window.clearTimeout(loadingFailSafe);
       subscription.unsubscribe();
     };
   }, [refreshProfile]);

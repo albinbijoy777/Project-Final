@@ -155,7 +155,11 @@ export default function App() {
 }
 
 function RootRedirect() {
-  const { user, profile } = useAuth();
+  const { user, profile, loading } = useAuth();
+
+  if (loading || (user && !profile)) {
+    return <AppBoot />;
+  }
 
   if (!user) {
     return <Navigate to="/login" replace />;
@@ -165,7 +169,11 @@ function RootRedirect() {
 }
 
 function GuestGate({ children }) {
-  const { user, profile } = useAuth();
+  const { user, profile, loading } = useAuth();
+
+  if (loading || (user && !profile)) {
+    return <AppBoot />;
+  }
 
   if (user) {
     return <Navigate to={getDashboardPath(profile?.role)} replace />;
