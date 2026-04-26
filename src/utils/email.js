@@ -1,23 +1,29 @@
-export const APPROVED_EMAIL_DOMAIN = "@kristujayanti.com";
-
 export function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
 }
 
+export function getEmailPlaceholder() {
+  return "name@example.com";
+}
+
+export function getEmailFieldLabel() {
+  return "Email address";
+}
+
+export function getEmailRuleText() {
+  return "Any valid email address can be used for sign in and signup.";
+}
+
 export function isApprovedEmail(email) {
   const normalized = normalizeEmail(email);
-  return normalized.endsWith(APPROVED_EMAIL_DOMAIN);
+  return Boolean(normalized);
 }
 
 export function assertApprovedEmail(email) {
   const normalized = normalizeEmail(email);
 
   if (!normalized) {
-    throw new Error("Enter your university email address.");
-  }
-
-  if (!isApprovedEmail(normalized)) {
-    throw new Error(`Only ${APPROVED_EMAIL_DOMAIN} email addresses are allowed.`);
+    throw new Error("Enter your email address.");
   }
 
   return normalized;

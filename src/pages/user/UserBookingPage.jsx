@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowRight, Coins, CreditCard, MapPin } from "lucide-react";
-import { createBooking, getServiceById, listUserBookings } from "../../services/platformService.js";
+import { ArrowRight, CreditCard, MapPin, TicketPercent } from "lucide-react";
+import { createBooking, getServiceById, peekServiceCache } from "../../services/platformService.js";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
 import LoadingPanel from "../../components/LoadingPanel.jsx";
@@ -17,14 +17,18 @@ const TIME_SLOTS = [
   "07:30 PM",
 ];
 
+function normalizeCoupon(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
 export default function UserBookingPage() {
   const { serviceId } = useParams();
   const navigate = useNavigate();
   const { user, profile } = useAuth();
   const { pushToast } = useToast();
-  const [service, setService] = useState(null);
-  const [rewardBalance, setRewardBalance] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const cachedService = peekServiceCache(serviceId);
+  const [service, setService] = useState(cachedService || null);
+  const [loading, setLoading] = useState(!cachedService);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     date: "",
@@ -35,34 +39,35 @@ export default function UserBookingPage() {
     urgency: "standard",
     paymentMethod: "cash",
     promoCode: "",
-    rewardCoinsRedeemed: 0,
     requirementDetails: "",
   });
 
   useEffect(() => {
-    if (!user?.id) return;
+    let active = true;
 
     async function load() {
-      setLoading(true);
+      if (!cachedService) {
+        setLoading(true);
+      }
+
       try {
-        const [serviceData, bookingsData] = await Promise.all([
-          getServiceById(serviceId),
-          listUserBookings(user.id),
-        ]);
-        setService(serviceData);
-        const balance = bookingsData.reduce(
-          (total, booking) =>
-            total + (booking.status === "completed" ? booking.rewardCoinsEarned : 0) - booking.rewardCoinsRedeemed,
-          0
-        );
-        setRewardBalance(Math.max(balance, 0));
+        const serviceData = await getServiceById(serviceId);
+        if (active) {
+          setService(serviceData);
+        }
       } finally {
-        setLoading(false);
+        if (active) {
+          setLoading(false);
+        }
       }
     }
 
     load();
-  }, [serviceId, user?.id]);
+
+    return () => {
+      active = false;
+    };
+  }, [cachedService, serviceId]);
 
   useEffect(() => {
     setForm((current) => ({
@@ -87,10 +92,7 @@ export default function UserBookingPage() {
         userId: user.id,
         service,
         profile,
-        form: {
-          ...form,
-          rewardCoinsRedeemed: Number(form.rewardCoinsRedeemed || 0),
-        },
+        form,
       });
 
       pushToast({
@@ -114,9 +116,12 @@ export default function UserBookingPage() {
     return <LoadingPanel rows={4} />;
   }
 
-  const rewardRedeemed = Math.min(Number(form.rewardCoinsRedeemed || 0), rewardBalance);
-  const discountValue = form.promoCode ? Math.round(service.price * 0.1) : 0;
-  const finalPrice = Math.max(Number(service.price) - discountValue - rewardRedeemed, 0);
+  const enteredCoupon = normalizeCoupon(form.promoCode);
+  const expectedCoupon = normalizeCoupon(service.discountCode);
+  const couponApplied = Boolean(enteredCoupon && expectedCoupon && enteredCoupon === expectedCoupon);
+  const showCouponWarning = Boolean(enteredCoupon) && !couponApplied;
+  const discountValue = couponApplied ? Math.round(Number(service.price || 0) * 0.1) : 0;
+  const finalPrice = Math.max(Number(service.price) - discountValue, 0);
   const minDate = new Date().toISOString().split("T")[0];
 
   return (
@@ -125,7 +130,7 @@ export default function UserBookingPage() {
         <SectionHeading
           eyebrow="Booking checkout"
           title={`Schedule ${service.name}`}
-          description="Add service requirements, choose a slot, and confirm payment preferences."
+          description="Add service requirements, choose a slot, and apply your coupon before confirming."
         />
 
         <form className="mt-8 grid gap-4 sm:grid-cols-2" onSubmit={handleSubmit}>
@@ -183,16 +188,20 @@ export default function UserBookingPage() {
               <option value="online">Online payment</option>
             </select>
           </div>
-          <Field label="Promo code" name="promoCode" value={form.promoCode} onChange={handleChange} placeholder={service.discountCode} />
-          <Field
-            label={`Coins to redeem (max ${rewardBalance})`}
-            name="rewardCoinsRedeemed"
-            type="number"
-            value={form.rewardCoinsRedeemed}
-            onChange={handleChange}
-            min="0"
-            max={rewardBalance}
-          />
+          <div className="sm:col-span-2">
+            <Field
+              label="Coupon code"
+              name="promoCode"
+              value={form.promoCode}
+              onChange={handleChange}
+              placeholder={service.discountCode}
+            />
+            {showCouponWarning ? (
+              <div className="mt-2 rounded-2xl border border-rose-200/15 bg-rose-400/8 px-4 py-3 text-sm text-rose-100">
+                This coupon does not match the service offer code.
+              </div>
+            ) : null}
+          </div>
           <div className="sm:col-span-2">
             <label className="mb-2 block text-sm text-slate-300">Service requirements</label>
             <textarea
@@ -224,8 +233,7 @@ export default function UserBookingPage() {
           <h3 className="mt-3 text-2xl font-semibold text-white">{service.name}</h3>
           <div className="mt-6 space-y-3 text-sm text-slate-300">
             <SummaryRow label="Base price" value={formatCurrency(service.price)} />
-            <SummaryRow label="Promo discount" value={`- ${formatCurrency(discountValue)}`} />
-            <SummaryRow label="Coins redeemed" value={`- ${formatCurrency(rewardRedeemed)}`} />
+            <SummaryRow label="Coupon discount" value={`- ${formatCurrency(discountValue)}`} />
             <SummaryRow label="Final estimate" value={formatCurrency(finalPrice)} strong />
           </div>
         </div>
@@ -234,7 +242,11 @@ export default function UserBookingPage() {
           <div className="space-y-4">
             <InfoBlock icon={MapPin} title="Live assignment" text="Admin and workers will see this request immediately after confirmation." />
             <InfoBlock icon={CreditCard} title="Flexible payment" text="Keep checkout simple with online or cash-on-service payment methods." />
-            <InfoBlock icon={Coins} title="Reward wallet" text={`${rewardBalance} coins are currently available in your account.`} />
+            <InfoBlock
+              icon={TicketPercent}
+              title="Coupon offer"
+              text={couponApplied ? `${expectedCoupon} is applied to this booking.` : `Use ${service.discountCode} to unlock the service discount.`}
+            />
           </div>
         </div>
       </aside>
@@ -242,7 +254,7 @@ export default function UserBookingPage() {
   );
 }
 
-function Field({ label, name, type = "text", value, onChange, placeholder, min, max }) {
+function Field({ label, name, type = "text", value, onChange, placeholder, min }) {
   return (
     <div>
       <label className="mb-2 block text-sm text-slate-300">{label}</label>
@@ -254,8 +266,7 @@ function Field({ label, name, type = "text", value, onChange, placeholder, min, 
         className="input-shell w-full rounded-2xl px-4 py-3.5"
         placeholder={placeholder}
         min={min}
-        max={max}
-        required={type !== "number"}
+        required={type !== "text" || name !== "promoCode"}
       />
     </div>
   );

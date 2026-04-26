@@ -3,7 +3,10 @@ import { Download, Printer, Search, Trash2 } from "lucide-react";
 import {
   cancelBookingForCurrentRole,
   clearBookingHistoryForRole,
+  createServiceReview,
   listUserBookings,
+  listUserReviewLookup,
+  peekUserBookingsCache,
   requestBookingRescheduleForCurrentRole,
   subscribeToTable,
 } from "../../services/platformService.js";
@@ -24,16 +27,20 @@ import {
 import { collectRescheduleRequest } from "../../utils/bookingActions.js";
 
 export default function UserBookingsPage() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { pushToast } = useToast();
-  const [bookings, setBookings] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cachedBookings = peekUserBookingsCache(user?.id);
+  const [bookings, setBookings] = useState(cachedBookings || []);
+  const [loading, setLoading] = useState(cachedBookings === undefined);
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [dateFilter, setDateFilter] = useState("");
   const [sortBy, setSortBy] = useState("latest");
   const [cancellingId, setCancellingId] = useState(null);
   const [reschedulingId, setReschedulingId] = useState(null);
+  const [reviewedBookingIds, setReviewedBookingIds] = useState([]);
+  const [reviewDraft, setReviewDraft] = useState({ bookingId: null, rating: 5, comment: "" });
+  const [reviewingId, setReviewingId] = useState(null);
 
   useEffect(() => {
     if (!user?.id) return undefined;
@@ -44,8 +51,12 @@ export default function UserBookingsPage() {
       }
 
       try {
-        const data = await listUserBookings(user.id);
-        setBookings(data);
+        const [bookingsData, reviewLookup] = await Promise.all([
+          listUserBookings(user.id),
+          listUserReviewLookup(user.id).catch(() => []),
+        ]);
+        setBookings(bookingsData);
+        setReviewedBookingIds(reviewLookup);
       } finally {
         if (showLoader) {
           setLoading(false);
@@ -53,15 +64,30 @@ export default function UserBookingsPage() {
       }
     }
 
-    load(true);
+    load(cachedBookings === undefined);
 
-    return subscribeToTable({
+    const stopBookings = subscribeToTable({
       channelName: `user-bookings-page-${user.id}`,
       table: "bookings",
       filter: `user_id=eq.${user.id}`,
       onChange: () => load(false),
     });
-  }, [user?.id]);
+
+    const stopReviews = subscribeToTable({
+      channelName: `user-reviews-${user.id}`,
+      table: "reviews",
+      onChange: (payload) => {
+        if (!payload?.new?.user_id || payload.new.user_id === user.id || payload?.old?.user_id === user.id) {
+          load(false);
+        }
+      },
+    });
+
+    return () => {
+      stopBookings?.();
+      stopReviews?.();
+    };
+  }, [cachedBookings, user?.id]);
 
   function exportBookings() {
     downloadCsv(
@@ -163,6 +189,63 @@ export default function UserBookingsPage() {
       });
     } finally {
       setReschedulingId(null);
+    }
+  }
+
+  function openReviewForm(booking) {
+    setReviewDraft({
+      bookingId: booking.id,
+      rating: 5,
+      comment: "",
+    });
+  }
+
+  function handleReviewChange(event) {
+    const { name, value } = event.target;
+    setReviewDraft((current) => ({
+      ...current,
+      [name]: name === "rating" ? Number(value) : value,
+    }));
+  }
+
+  async function handleReviewSubmit(booking) {
+    const comment = String(reviewDraft.comment || "").trim();
+    if (!comment) {
+      pushToast({
+        title: "Review required",
+        message: "Write a short comment before submitting your feedback.",
+        type: "error",
+      });
+      return;
+    }
+
+    setReviewingId(booking.id);
+
+    try {
+      await createServiceReview({
+        bookingId: booking.id,
+        serviceName: booking.serviceName,
+        userId: user?.id,
+        author: profile?.name || user?.email?.split("@")[0] || "Customer",
+        rating: reviewDraft.rating,
+        comment,
+      });
+
+      setReviewedBookingIds((current) => [...new Set([...current, booking.id])]);
+      setReviewDraft({ bookingId: null, rating: 5, comment: "" });
+      pushToast({
+        title: "Review submitted",
+        message: "Your feedback is now part of the live service rating.",
+        type: "success",
+      });
+    } catch (error) {
+      pushToast({
+        title: "Review failed",
+        message: error.message || "Unable to submit your review right now.",
+        type: "error",
+      });
+    } finally {
+      setReviewingId(null);
     }
   }
 
@@ -299,13 +382,18 @@ export default function UserBookingsPage() {
                   {formatDateTime(booking.service_date, booking.service_time)}
                 </p>
                 <p className="mt-3 text-sm leading-6 text-slate-500">{booking.address}</p>
+                <p className="mt-3 text-sm text-slate-300">
+                  {booking.assignedWorkerName ? `Assigned worker: ${booking.assignedWorkerName}` : "Assigned worker: waiting for admin assignment"}
+                </p>
                 {booking.requirementDetails ? (
                   <p className="mt-4 text-sm leading-6 text-slate-400">{booking.requirementDetails}</p>
                 ) : null}
 
                 {booking.hasPendingReschedule ? (
                   <div className="mt-4 rounded-[22px] border border-amber-200/20 bg-amber-300/8 px-4 py-3 text-sm text-amber-100">
-                    Requested slot: {booking.rescheduleRequest?.requestedDate} at {booking.rescheduleRequest?.requestedTime}
+                    {booking.rescheduleRequest?.requestedBy === "worker"
+                      ? `${booking.rescheduleRequest?.actorLabel || "Your worker"} asked admin to reassign or reschedule this booking.`
+                      : `Requested slot: ${booking.rescheduleRequest?.requestedDate} at ${booking.rescheduleRequest?.requestedTime}`}
                   </div>
                 ) : null}
 
@@ -316,6 +404,74 @@ export default function UserBookingsPage() {
                     </div>
                   ))}
                 </div>
+                {booking.latestTimelineEntry?.note ? (
+                  <p className="mt-4 text-sm leading-6 text-slate-400">{booking.latestTimelineEntry.note}</p>
+                ) : null}
+
+                {booking.status === "completed" ? (
+                  reviewedBookingIds.includes(booking.id) ? (
+                    <div className="mt-5 rounded-[22px] border border-emerald-200/20 bg-emerald-400/8 px-4 py-3 text-sm text-emerald-100">
+                      Your review for this booking has already been submitted.
+                    </div>
+                  ) : reviewDraft.bookingId === booking.id ? (
+                    <div className="mt-5 rounded-[24px] border border-white/8 bg-white/4 p-4">
+                      <p className="text-sm font-semibold text-white">Rate this completed service</p>
+                      <div className="mt-4 grid gap-4 sm:grid-cols-[150px_1fr]">
+                        <div>
+                          <label className="mb-2 block text-sm text-slate-300">Rating</label>
+                          <select
+                            name="rating"
+                            value={reviewDraft.rating}
+                            onChange={handleReviewChange}
+                            className="input-shell w-full rounded-2xl px-4 py-3"
+                          >
+                            {[5, 4, 3, 2, 1].map((value) => (
+                              <option key={value} value={value}>
+                                {value} stars
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-sm text-slate-300">Feedback</label>
+                          <textarea
+                            name="comment"
+                            rows="4"
+                            value={reviewDraft.comment}
+                            onChange={handleReviewChange}
+                            className="input-shell w-full rounded-2xl px-4 py-3.5"
+                            placeholder="Share your experience with this worker and service."
+                          />
+                        </div>
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-3">
+                        <button
+                          type="button"
+                          onClick={() => handleReviewSubmit(booking)}
+                          disabled={reviewingId === booking.id}
+                          className="rounded-2xl bg-gradient-to-r from-amber-300 to-orange-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:brightness-110 disabled:opacity-60"
+                        >
+                          {reviewingId === booking.id ? "Submitting..." : "Submit review"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setReviewDraft({ bookingId: null, rating: 5, comment: "" })}
+                          className="rounded-2xl border border-white/10 bg-white/6 px-4 py-3 text-sm font-medium text-white transition hover:bg-white/10"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => openReviewForm(booking)}
+                      className="mt-5 rounded-2xl border border-amber-200/20 bg-amber-300/8 px-4 py-3 text-sm font-semibold text-amber-100 transition hover:bg-amber-300/12"
+                    >
+                      Rate and review
+                    </button>
+                  )
+                ) : null}
               </div>
 
               <div className="flex min-w-[220px] flex-col gap-3">

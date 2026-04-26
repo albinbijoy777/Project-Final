@@ -39,6 +39,7 @@ export function matchesBookingSearch(booking, searchValue) {
     booking.address,
     booking.requirementDetails,
     booking.status,
+    booking.assignedWorkerName,
     booking.rescheduleRequest?.requestedDate,
     booking.rescheduleRequest?.requestedTime,
     booking.rescheduleRequest?.reason,

@@ -4,11 +4,15 @@ import { ArrowRight, CheckCircle2, ShieldCheck } from "lucide-react";
 import { motion as Motion } from "framer-motion";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
-import { APPROVED_EMAIL_DOMAIN } from "../../utils/email.js";
+import {
+  getEmailFieldLabel,
+  getEmailPlaceholder,
+  getEmailRuleText,
+} from "../../utils/email.js";
 import { getDashboardPath } from "../../utils/routes.js";
 
 const ROLES = [
-  { value: "user", label: "User", description: "Book services, track updates, manage rewards." },
+  { value: "user", label: "User", description: "Book services, track updates, and manage bookings." },
   { value: "worker", label: "Worker", description: "Accept assignments, update job progress, manage profile." },
 ];
 
@@ -74,7 +78,7 @@ export default function RegisterPage() {
       >
         <div className="mesh-bg border-b border-white/8 p-8 lg:border-b-0 lg:border-r lg:p-10">
           <span className="inline-flex rounded-full border border-amber-200/20 bg-amber-300/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.22em] text-amber-100">
-            Approved domain only
+            Flexible sign up
           </span>
           <h1 className="mt-6 text-4xl font-semibold text-white">Create your FixBee account</h1>
           <p className="mt-4 text-sm leading-7 text-slate-300">
@@ -89,7 +93,7 @@ export default function RegisterPage() {
               <div>
                 <p className="text-sm font-semibold text-white">Email rule</p>
                 <p className="mt-2 text-sm leading-6 text-slate-300">
-                  Use an email that ends with <span className="font-medium text-white">{APPROVED_EMAIL_DOMAIN}</span>. Other domains are blocked automatically.
+                  {getEmailRuleText()}
                 </p>
               </div>
             </div>
@@ -136,12 +140,12 @@ export default function RegisterPage() {
           <form className="mt-8 grid gap-4 sm:grid-cols-2" onSubmit={handleSubmit}>
             <Field label="Full name" name="name" value={form.name} onChange={handleChange} placeholder="Your name" />
             <Field
-              label="University email"
+              label={getEmailFieldLabel()}
               name="email"
               type="email"
               value={form.email}
               onChange={handleChange}
-              placeholder={`name${APPROVED_EMAIL_DOMAIN}`}
+              placeholder={getEmailPlaceholder()}
             />
             <Field label="Phone" name="phone" value={form.phone} onChange={handleChange} placeholder="+91 9XXXXXXXXX" />
             <Field label="Password" name="password" type="password" value={form.password} onChange={handleChange} placeholder="Create a strong password" />

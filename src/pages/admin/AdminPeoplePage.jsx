@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ShieldCheck } from "lucide-react";
-import { listProfiles, subscribeToTable, updateProfileRecord } from "../../services/platformService.js";
+import { listProfiles, peekProfilesCache, subscribeToTable, updateProfileRecord } from "../../services/platformService.js";
 import { useToast } from "../../context/ToastContext.jsx";
 import LoadingPanel from "../../components/LoadingPanel.jsx";
 
@@ -8,8 +8,9 @@ const ROLE_OPTIONS = ["user", "worker", "admin"];
 
 export default function AdminPeoplePage() {
   const { pushToast } = useToast();
-  const [people, setPeople] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cachedPeople = peekProfilesCache();
+  const [people, setPeople] = useState(cachedPeople || []);
+  const [loading, setLoading] = useState(cachedPeople === undefined);
 
   useEffect(() => {
     async function load(showLoader = false) {
@@ -27,14 +28,14 @@ export default function AdminPeoplePage() {
       }
     }
 
-    load(true);
+    load(cachedPeople === undefined);
 
     return subscribeToTable({
       channelName: "admin-people",
       table: "profiles",
       onChange: () => load(false),
     });
-  }, []);
+  }, [cachedPeople]);
 
   async function handleRoleChange(personId, nextRole) {
     try {

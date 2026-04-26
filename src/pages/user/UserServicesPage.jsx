@@ -1,14 +1,15 @@
 import { useDeferredValue, useEffect, useState } from "react";
 import { Search } from "lucide-react";
-import { listServices, subscribeToTable } from "../../services/platformService.js";
+import { listServices, peekServicesCache, subscribeToTable } from "../../services/platformService.js";
 import ServiceCard from "../../components/ServiceCard.jsx";
 import LoadingPanel from "../../components/LoadingPanel.jsx";
 import SectionHeading from "../../components/SectionHeading.jsx";
 
 export default function UserServicesPage() {
-  const [services, setServices] = useState([]);
+  const cachedServices = peekServicesCache();
+  const [services, setServices] = useState(cachedServices || []);
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(cachedServices === undefined);
   const deferredSearch = useDeferredValue(search);
 
   useEffect(() => {
@@ -27,13 +28,13 @@ export default function UserServicesPage() {
       }
     }
 
-    load(true);
+    load(cachedServices === undefined);
     return subscribeToTable({
       channelName: "user-services-page",
       table: "services",
       onChange: () => load(false),
     });
-  }, []);
+  }, [cachedServices]);
 
   const filteredServices = services.filter((service) => {
     const query = deferredSearch.trim().toLowerCase();
@@ -50,7 +51,7 @@ export default function UserServicesPage() {
       <SectionHeading
         eyebrow="Marketplace"
         title="Book from a premium service catalog"
-        description="Every service card includes live availability, transparent pricing, reward codes, and detail pages with FAQs and reviews."
+        description="Every service card includes live availability, transparent pricing, coupon offers, and detail pages with FAQs and reviews."
       />
 
       <div className="panel rounded-[30px] p-4">

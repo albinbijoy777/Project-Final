@@ -5,9 +5,7 @@ import {
   getCurrentSession,
   login as loginRequest,
   logout as logoutRequest,
-  sendPasswordResetEmail,
   signUp as signUpRequest,
-  updatePassword as updatePasswordRequest,
   updateExistingProfile,
   upsertProfile,
 } from "../services/auth.js";
@@ -232,17 +230,6 @@ export function AuthProvider({ children }) {
     }
   }
 
-  async function updatePassword(password) {
-    const updatedUser = await updatePasswordRequest(password);
-
-    if (updatedUser) {
-      setUser(updatedUser);
-      await refreshProfile(updatedUser);
-    }
-
-    return updatedUser;
-  }
-
   return (
     <AuthContext.Provider
       value={{
@@ -255,8 +242,6 @@ export function AuthProvider({ children }) {
         logout,
         updateProfile,
         updateAvatar,
-        updatePassword,
-        sendPasswordResetEmail,
         refreshProfile: () => refreshProfile(user),
       }}
     >

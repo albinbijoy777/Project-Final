@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
-import { listServices, removeService, saveService, subscribeToTable } from "../../services/platformService.js";
+import { listServices, peekServicesCache, removeService, saveService, subscribeToTable } from "../../services/platformService.js";
+import { uploadServiceImage } from "../../services/serviceMedia.js";
 import { useToast } from "../../context/ToastContext.jsx";
 import LoadingPanel from "../../components/LoadingPanel.jsx";
 import { formatCurrency } from "../../utils/formatters.js";
@@ -11,15 +12,18 @@ const INITIAL_FORM = {
   category: "",
   description: "",
   price: "",
+  imageUrl: "",
   active: true,
 };
 
 export default function AdminServicesPage() {
   const { pushToast } = useToast();
-  const [services, setServices] = useState([]);
+  const cachedServices = peekServicesCache({ includeInactive: true });
+  const [services, setServices] = useState(cachedServices || []);
   const [form, setForm] = useState(INITIAL_FORM);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(cachedServices === undefined);
   const [saving, setSaving] = useState(false);
+  const [imageFile, setImageFile] = useState(null);
 
   useEffect(() => {
     async function load(showLoader = false) {
@@ -37,13 +41,13 @@ export default function AdminServicesPage() {
       }
     }
 
-    load(true);
+    load(cachedServices === undefined);
     return subscribeToTable({
       channelName: "admin-services",
       table: "services",
       onChange: () => load(false),
     });
-  }, []);
+  }, [cachedServices]);
 
   function handleChange(event) {
     const { name, value, type, checked } = event.target;
@@ -60,8 +64,10 @@ export default function AdminServicesPage() {
       category: service.category,
       description: service.description,
       price: service.price,
+      imageUrl: service.imageUrl || service.image_url || service.coverImage || "",
       active: service.active !== false,
     });
+    setImageFile(null);
   }
 
   async function handleSubmit(event) {
@@ -69,13 +75,18 @@ export default function AdminServicesPage() {
     setSaving(true);
 
     try {
-      const saved = await saveService(form);
+      const nextImageUrl = imageFile ? await uploadServiceImage(form.name, imageFile) : form.imageUrl;
+      const saved = await saveService({
+        ...form,
+        imageUrl: nextImageUrl || form.imageUrl || "",
+      });
       pushToast({
         title: form.id ? "Service updated" : "Service created",
         message: `${saved.name} is now available in the admin catalog.`,
         type: "success",
       });
       setForm(INITIAL_FORM);
+      setImageFile(null);
       setServices((current) => {
         const exists = current.some((service) => service.id === saved.id);
         return exists
@@ -128,6 +139,26 @@ export default function AdminServicesPage() {
           <Field label="Category" name="category" value={form.category} onChange={handleChange} />
           <Field label="Starting price" name="price" type="number" value={form.price} onChange={handleChange} />
           <div>
+            <label className="mb-2 block text-sm text-slate-300">Service image</label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(event) => setImageFile(event.target.files?.[0] || null)}
+              className="input-shell w-full rounded-2xl px-4 py-3.5 file:mr-4 file:rounded-xl file:border-0 file:bg-amber-300/10 file:px-3 file:py-2 file:text-sm file:font-medium file:text-amber-100"
+            />
+            {form.imageUrl ? (
+              <div className="mt-3 overflow-hidden rounded-[22px] border border-white/8 bg-white/4">
+                <img
+                  src={form.imageUrl}
+                  alt={form.name || "Service preview"}
+                  className="h-40 w-full object-cover"
+                  loading="lazy"
+                  decoding="async"
+                />
+              </div>
+            ) : null}
+          </div>
+          <div>
             <label className="mb-2 block text-sm text-slate-300">Description</label>
             <textarea
               name="description"
@@ -157,7 +188,18 @@ export default function AdminServicesPage() {
         {services.map((service) => (
           <div key={service.id} className="panel rounded-[30px] p-6">
             <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-              <div>
+              <div className="min-w-0 flex-1">
+                {service.coverImage ? (
+                  <div className="mb-4 overflow-hidden rounded-[24px] border border-white/8 bg-white/4">
+                    <img
+                      src={service.coverImage}
+                      alt={service.name}
+                      className="h-48 w-full object-cover"
+                      loading="lazy"
+                      decoding="async"
+                    />
+                  </div>
+                ) : null}
                 <div className="flex flex-wrap items-center gap-3">
                   <h3 className="text-xl font-semibold text-white">{service.name}</h3>
                   <span className="rounded-full bg-white/8 px-3 py-1 text-xs text-slate-300">

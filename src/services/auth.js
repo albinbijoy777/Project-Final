@@ -3,11 +3,6 @@ import { supabase } from "./supabase.js";
 import { normalizeRole } from "../utils/roles.js";
 import { assertApprovedEmail, normalizeEmail } from "../utils/email.js";
 
-function getPasswordResetRedirect() {
-  if (typeof window === "undefined") return undefined;
-  return `${window.location.origin}/reset-password`;
-}
-
 function profilePayload(user, details = {}) {
   return {
     id: user.id,
@@ -95,24 +90,6 @@ export async function signUp({ email, password, name, role, phone, address }) {
     );
   }
   return data;
-}
-
-export async function sendPasswordResetEmail(email) {
-  const normalizedEmail = assertApprovedEmail(email);
-  const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
-    redirectTo: getPasswordResetRedirect(),
-  });
-  if (error) throw new Error(error.message);
-}
-
-export async function updatePassword(password) {
-  if (!password || password.length < 8) {
-    throw new Error("Use a password with at least 8 characters.");
-  }
-
-  const { data, error } = await supabase.auth.updateUser({ password });
-  if (error) throw new Error(error.message);
-  return data.user;
 }
 
 export async function logout() {

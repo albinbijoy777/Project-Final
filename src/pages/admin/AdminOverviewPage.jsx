@@ -11,7 +11,15 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { listAllBookings, listProfiles, listServices, subscribeToTable } from "../../services/platformService.js";
+import {
+  listAllBookings,
+  listProfiles,
+  listServices,
+  peekAllBookingsCache,
+  peekProfilesCache,
+  peekServicesCache,
+  subscribeToTable,
+} from "../../services/platformService.js";
 import LoadingPanel from "../../components/LoadingPanel.jsx";
 import StatCard from "../../components/StatCard.jsx";
 import SectionHeading from "../../components/SectionHeading.jsx";
@@ -20,11 +28,14 @@ import { formatCompactNumber, formatCurrency } from "../../utils/formatters.js";
 const STATUS_COLORS = ["#38bdf8", "#14b8a6", "#f59e0b", "#fb7185"];
 
 export default function AdminOverviewPage() {
+  const cachedBookings = peekAllBookingsCache();
+  const cachedProfiles = peekProfilesCache();
+  const cachedServices = peekServicesCache({ includeInactive: true });
   const [state, setState] = useState({
-    bookings: [],
-    profiles: [],
-    services: [],
-    loading: true,
+    bookings: cachedBookings || [],
+    profiles: cachedProfiles || [],
+    services: cachedServices || [],
+    loading: !(cachedBookings !== undefined && cachedProfiles !== undefined && cachedServices !== undefined),
   });
 
   useEffect(() => {
@@ -47,7 +58,7 @@ export default function AdminOverviewPage() {
       }
     }
 
-    load(true);
+    load(cachedBookings === undefined || cachedProfiles === undefined || cachedServices === undefined);
 
     const stopBookings = subscribeToTable({
       channelName: "admin-overview-bookings",
@@ -70,7 +81,7 @@ export default function AdminOverviewPage() {
       stopProfiles?.();
       stopServices?.();
     };
-  }, []);
+  }, [cachedBookings, cachedProfiles, cachedServices]);
 
   if (state.loading) {
     return <LoadingPanel rows={5} />;

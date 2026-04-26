@@ -5,6 +5,8 @@ import {
   clearBookingHistoryForRole,
   listAllBookings,
   listProfiles,
+  peekAllBookingsCache,
+  peekProfilesCache,
   subscribeToTable,
   updateBookingStatus,
 } from "../../services/platformService.js";
@@ -23,14 +25,16 @@ import {
 } from "../../utils/bookingFilters.js";
 import { Search, Trash2 } from "lucide-react";
 
-const STATUS_OPTIONS = ["pending", "assigned", "in_progress", "completed", "cancelled"];
+const STATUS_OPTIONS = ["pending", "assigned", "in_progress", "cancelled"];
 
 export default function AdminBookingsPage() {
   const { profile } = useAuth();
   const { pushToast } = useToast();
-  const [bookings, setBookings] = useState([]);
-  const [workers, setWorkers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cachedBookings = peekAllBookingsCache();
+  const cachedWorkers = peekProfilesCache("worker");
+  const [bookings, setBookings] = useState(cachedBookings || []);
+  const [workers, setWorkers] = useState(cachedWorkers || []);
+  const [loading, setLoading] = useState(!(cachedBookings !== undefined && cachedWorkers !== undefined));
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [dateFilter, setDateFilter] = useState("");
@@ -57,7 +61,7 @@ export default function AdminBookingsPage() {
       }
     }
 
-    load(true);
+    load(cachedBookings === undefined || cachedWorkers === undefined);
 
     const stopBookings = subscribeToTable({
       channelName: "admin-bookings-list",
@@ -74,13 +78,13 @@ export default function AdminBookingsPage() {
       stopBookings?.();
       stopProfiles?.();
     };
-  }, []);
+  }, [cachedBookings, cachedWorkers]);
 
   async function handleAssign(bookingId, workerId) {
     if (!workerId) return;
 
     try {
-      await assignWorkerToBooking(bookingId, workerId, profile?.name || "Admin");
+      const updated = await assignWorkerToBooking(bookingId, workerId, profile?.name || "Admin");
       pushToast({
         title: "Worker assigned",
         message: "The booking has been routed successfully.",
@@ -89,11 +93,7 @@ export default function AdminBookingsPage() {
       setBookings((current) =>
         current.map((booking) =>
           booking.id === bookingId
-            ? {
-                ...booking,
-                technician_id: workerId,
-                status: booking.status === "pending" ? "assigned" : booking.status,
-              }
+            ? updated
             : booking
         )
       );
@@ -274,20 +274,33 @@ export default function AdminBookingsPage() {
               {booking.hasPendingReschedule ? (
                 <div className="mt-4 rounded-[24px] border border-amber-200/20 bg-amber-300/8 p-4">
                   <p className="text-sm font-semibold text-amber-100">Pending reschedule request</p>
-                  <p className="mt-2 text-sm text-slate-200">
-                    Requested slot: {booking.rescheduleRequest?.requestedDate} at {booking.rescheduleRequest?.requestedTime}
-                  </p>
-                  <p className="mt-2 text-sm text-slate-300">
-                    Reason: {booking.rescheduleRequest?.reason || "No reason provided"}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => handleApproveReschedule(booking)}
-                    disabled={approvingId === booking.id}
-                    className="mt-4 rounded-2xl bg-gradient-to-r from-amber-300 to-orange-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {approvingId === booking.id ? "Applying..." : "Approve requested slot"}
-                  </button>
+                  {booking.rescheduleRequest?.requestedBy === "worker" ? (
+                    <>
+                      <p className="mt-2 text-sm text-slate-200">
+                        {booking.rescheduleRequest?.actorLabel || "The worker"} asked for admin action on this booking.
+                      </p>
+                      <p className="mt-2 text-sm text-slate-300">
+                        Reassign a new worker or cancel the booking if the current worker cannot continue.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="mt-2 text-sm text-slate-200">
+                        Requested slot: {booking.rescheduleRequest?.requestedDate} at {booking.rescheduleRequest?.requestedTime}
+                      </p>
+                      <p className="mt-2 text-sm text-slate-300">
+                        Reason: {booking.rescheduleRequest?.reason || "No reason provided"}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => handleApproveReschedule(booking)}
+                        disabled={approvingId === booking.id}
+                        className="mt-4 rounded-2xl bg-gradient-to-r from-amber-300 to-orange-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {approvingId === booking.id ? "Applying..." : "Approve requested slot"}
+                      </button>
+                    </>
+                  )}
                 </div>
               ) : null}
             </div>
@@ -311,17 +324,23 @@ export default function AdminBookingsPage() {
                 ))}
               </select>
 
-              <select
-                value={booking.status}
-                onChange={(event) => handleStatusChange(booking.id, event.target.value)}
-                className="input-shell w-full rounded-2xl px-4 py-3.5"
-              >
-                {STATUS_OPTIONS.map((status) => (
-                  <option key={status} value={status}>
-                    {status.replaceAll("_", " ")}
-                  </option>
-                ))}
-              </select>
+              {booking.status === "completed" ? (
+                <div className="rounded-[24px] border border-emerald-200/20 bg-emerald-400/8 px-4 py-3 text-sm font-medium text-emerald-100">
+                  Completed by worker
+                </div>
+              ) : (
+                <select
+                  value={booking.status}
+                  onChange={(event) => handleStatusChange(booking.id, event.target.value)}
+                  className="input-shell w-full rounded-2xl px-4 py-3.5"
+                >
+                  {STATUS_OPTIONS.map((status) => (
+                    <option key={status} value={status}>
+                      {status.replaceAll("_", " ")}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
         </div>

@@ -1,6 +1,90 @@
--- FixBee history + notifications patch
--- Run this on your current Supabase project after fixbee_final_reset.sql.
--- It adds per-role booking history cleanup and notification clear support.
+-- FixBee latest upgrade patch
+-- Run this in the Supabase SQL Editor on your current FixBee database.
+-- It removes email-domain restriction and applies the latest booking history,
+-- review, and service media updates without changing your current login emails.
+
+begin;
+
+drop trigger if exists enforce_kristujayanti_email on auth.users;
+drop trigger if exists enforce_fixbee_email on auth.users;
+
+drop function if exists public.require_kristujayanti_email() cascade;
+drop function if exists public.require_fixbee_email() cascade;
+drop function if exists public.password_reset_account_exists(text);
+
+alter table public.profiles
+  drop constraint if exists profiles_email_domain_check;
+
+drop policy if exists "profiles_insert_own" on public.profiles;
+create policy "profiles_insert_own"
+on public.profiles
+for insert
+to authenticated
+with check (auth.uid() = id);
+
+drop policy if exists "profiles_update_own_or_admin" on public.profiles;
+create policy "profiles_update_own_or_admin"
+on public.profiles
+for update
+to authenticated
+using (auth.uid() = id or public.is_admin())
+with check (auth.uid() = id or public.is_admin());
+
+grant usage on schema public to anon, authenticated, service_role;
+grant execute on all functions in schema public to anon, authenticated, service_role;
+grant select on all tables in schema public to anon;
+grant select, insert, update, delete on all tables in schema public to authenticated, service_role;
+grant usage, select on all sequences in schema public to authenticated, service_role;
+
+alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;
+alter default privileges in schema public grant select on tables to anon;
+alter default privileges in schema public grant select, insert, update, delete on tables to authenticated, service_role;
+alter default privileges in schema public grant usage, select on sequences to authenticated, service_role;
+
+grant usage on schema storage to authenticated, service_role;
+grant select on storage.buckets to anon, authenticated, service_role;
+grant select, insert, update, delete on storage.objects to authenticated, service_role;
+
+drop policy if exists "avatars_public_read" on storage.objects;
+create policy "avatars_public_read"
+on storage.objects
+for select
+to public
+using (bucket_id = 'avatars');
+
+drop policy if exists "avatars_insert_own_folder" on storage.objects;
+create policy "avatars_insert_own_folder"
+on storage.objects
+for insert
+to authenticated
+with check (
+  bucket_id = 'avatars'
+  and (storage.foldername(name))[1] = auth.uid()::text
+);
+
+drop policy if exists "avatars_update_own_folder" on storage.objects;
+create policy "avatars_update_own_folder"
+on storage.objects
+for update
+to authenticated
+using (
+  bucket_id = 'avatars'
+  and (storage.foldername(name))[1] = auth.uid()::text
+)
+with check (
+  bucket_id = 'avatars'
+  and (storage.foldername(name))[1] = auth.uid()::text
+);
+
+drop policy if exists "avatars_delete_own_folder" on storage.objects;
+create policy "avatars_delete_own_folder"
+on storage.objects
+for delete
+to authenticated
+using (
+  bucket_id = 'avatars'
+  and (storage.foldername(name))[1] = auth.uid()::text
+);
 
 alter table public.bookings
   add column if not exists hidden_for_user boolean not null default false,
@@ -71,8 +155,6 @@ begin
   raise exception 'Unsupported role value: %', target_role;
 end;
 $$;
-
-grant execute on function public.clear_booking_history_for_role_items(text, uuid[]) to authenticated, service_role;
 
 create or replace function public.cancel_booking_for_current_role(
   target_booking_id uuid,
@@ -172,8 +254,6 @@ begin
   return target_booking;
 end;
 $$;
-
-grant execute on function public.cancel_booking_for_current_role(uuid, text, text) to authenticated, service_role;
 
 create or replace function public.request_booking_reschedule_for_current_role(
   target_booking_id uuid,
@@ -296,8 +376,6 @@ begin
 end;
 $$;
 
-grant execute on function public.request_booking_reschedule_for_current_role(uuid, date, text, text, text) to authenticated, service_role;
-
 create or replace function public.approve_booking_reschedule_request(
   target_booking_id uuid,
   actor_label text default null
@@ -402,6 +480,9 @@ begin
 end;
 $$;
 
+grant execute on function public.clear_booking_history_for_role_items(text, uuid[]) to authenticated, service_role;
+grant execute on function public.cancel_booking_for_current_role(uuid, text, text) to authenticated, service_role;
+grant execute on function public.request_booking_reschedule_for_current_role(uuid, date, text, text, text) to authenticated, service_role;
 grant execute on function public.approve_booking_reschedule_request(uuid, text) to authenticated, service_role;
 
 drop policy if exists "notifications_delete_own_or_admin" on public.notifications;
@@ -410,3 +491,277 @@ on public.notifications
 for delete
 to authenticated
 using (user_id = auth.uid() or public.is_admin());
+
+alter table public.services
+  add column if not exists image_url text;
+
+alter table public.reviews
+  add column if not exists user_id uuid references public.profiles(id) on delete set null;
+
+alter table public.reviews
+  add column if not exists booking_id uuid references public.bookings(id) on delete cascade;
+
+create index if not exists idx_reviews_user_id on public.reviews(user_id);
+create unique index if not exists idx_reviews_booking_unique
+on public.reviews(booking_id)
+where booking_id is not null;
+
+insert into storage.buckets (id, name, public)
+select 'service-media', 'service-media', true
+where not exists (
+  select 1
+  from storage.buckets
+  where id = 'service-media'
+);
+
+drop policy if exists "service_media_public_read" on storage.objects;
+create policy "service_media_public_read"
+on storage.objects
+for select
+to public
+using (bucket_id = 'service-media');
+
+drop policy if exists "service_media_admin_insert" on storage.objects;
+create policy "service_media_admin_insert"
+on storage.objects
+for insert
+to authenticated
+with check (
+  bucket_id = 'service-media'
+  and public.is_admin()
+);
+
+drop policy if exists "service_media_admin_update" on storage.objects;
+create policy "service_media_admin_update"
+on storage.objects
+for update
+to authenticated
+using (
+  bucket_id = 'service-media'
+  and public.is_admin()
+)
+with check (
+  bucket_id = 'service-media'
+  and public.is_admin()
+);
+
+drop policy if exists "service_media_admin_delete" on storage.objects;
+create policy "service_media_admin_delete"
+on storage.objects
+for delete
+to authenticated
+using (
+  bucket_id = 'service-media'
+  and public.is_admin()
+);
+
+drop policy if exists "reviews_select_authenticated" on public.reviews;
+create policy "reviews_select_authenticated"
+on public.reviews
+for select
+to authenticated
+using (true);
+
+drop policy if exists "reviews_admin_insert" on public.reviews;
+drop policy if exists "reviews_insert_completed_owner_or_admin" on public.reviews;
+create policy "reviews_insert_completed_owner_or_admin"
+on public.reviews
+for insert
+to authenticated
+with check (
+  public.is_admin()
+  or (
+    user_id = auth.uid()
+    and booking_id is not null
+    and exists (
+      select 1
+      from public.bookings
+      where id = booking_id
+        and user_id = auth.uid()
+        and status = 'completed'
+        and service = reviews.service
+    )
+  )
+);
+
+create or replace function public.sync_service_rating_from_reviews(target_service text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.services as services
+  set rating = case when stats.review_count > 0 then stats.avg_rating else services.rating end,
+      reviews_count = stats.review_count,
+      updated_at = timezone('utc', now())
+  from (
+    select
+      round(coalesce(avg(reviews.rating), 0)::numeric, 2) as avg_rating,
+      count(*)::integer as review_count
+    from public.reviews as reviews
+    where reviews.service = target_service
+  ) as stats
+  where services.name = target_service;
+end;
+$$;
+
+create or replace function public.handle_review_stats_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_op = 'DELETE' then
+    perform public.sync_service_rating_from_reviews(old.service);
+    return old;
+  end if;
+
+  if tg_op = 'UPDATE' and old.service is distinct from new.service then
+    perform public.sync_service_rating_from_reviews(old.service);
+  end if;
+
+  perform public.sync_service_rating_from_reviews(new.service);
+  return new;
+end;
+$$;
+
+drop trigger if exists reviews_sync_service_stats on public.reviews;
+create trigger reviews_sync_service_stats
+after insert or update or delete on public.reviews
+for each row execute procedure public.handle_review_stats_change();
+
+do $$
+declare
+  service_name text;
+begin
+  for service_name in select name from public.services loop
+    perform public.sync_service_rating_from_reviews(service_name);
+  end loop;
+end;
+$$;
+
+create or replace function public.seed_auth_user(seed_email text, seed_password text, seed_name text, seed_role text)
+returns uuid
+language plpgsql
+security definer
+set search_path = extensions, public
+as $$
+declare
+  normalized_email text := lower(trim(seed_email));
+  normalized_role text := public.normalize_role(seed_role);
+  seeded_user_id uuid;
+begin
+  select id
+  into seeded_user_id
+  from auth.users
+  where lower(email) = normalized_email
+  limit 1;
+
+  if seeded_user_id is null then
+    seeded_user_id := public.new_uuid();
+
+    insert into auth.users (
+      instance_id,
+      id,
+      aud,
+      role,
+      email,
+      encrypted_password,
+      email_confirmed_at,
+      confirmation_token,
+      email_change,
+      email_change_token_new,
+      recovery_token,
+      raw_app_meta_data,
+      raw_user_meta_data,
+      created_at,
+      updated_at
+    )
+    values (
+      '00000000-0000-0000-0000-000000000000',
+      seeded_user_id,
+      'authenticated',
+      'authenticated',
+      normalized_email,
+      crypt(seed_password, gen_salt('bf')),
+      timezone('utc', now()),
+      '',
+      '',
+      '',
+      '',
+      '{"provider":"email","providers":["email"]}'::jsonb,
+      jsonb_build_object('name', seed_name, 'role', normalized_role),
+      timezone('utc', now()),
+      timezone('utc', now())
+    );
+  else
+    update auth.users
+    set email = normalized_email,
+        encrypted_password = crypt(seed_password, gen_salt('bf')),
+        email_confirmed_at = coalesce(email_confirmed_at, timezone('utc', now())),
+        raw_app_meta_data = '{"provider":"email","providers":["email"]}'::jsonb,
+        raw_user_meta_data = jsonb_build_object('name', seed_name, 'role', normalized_role),
+        updated_at = timezone('utc', now()),
+        confirmation_token = '',
+        email_change = '',
+        email_change_token_new = '',
+        recovery_token = ''
+    where id = seeded_user_id;
+  end if;
+
+  update auth.identities
+  set identity_data = jsonb_set(
+        jsonb_set(
+          coalesce(identity_data, '{}'::jsonb),
+          '{email}',
+          to_jsonb(normalized_email),
+          true
+        ),
+        '{email_verified}',
+        'true'::jsonb,
+        true
+      ),
+      updated_at = timezone('utc', now())
+  where user_id = seeded_user_id;
+
+  insert into auth.identities (
+    id,
+    user_id,
+    identity_data,
+    provider,
+    provider_id,
+    created_at,
+    updated_at,
+    last_sign_in_at
+  )
+  values (
+    public.new_uuid(),
+    seeded_user_id,
+    jsonb_build_object(
+      'sub', seeded_user_id::text,
+      'email', normalized_email,
+      'email_verified', true
+    ),
+    'email',
+    seeded_user_id::text,
+    timezone('utc', now()),
+    timezone('utc', now()),
+    timezone('utc', now())
+  )
+  on conflict do nothing;
+
+  insert into public.profiles (id, email, name, role)
+  values (seeded_user_id, normalized_email, seed_name, normalized_role)
+  on conflict (id) do update
+    set email = excluded.email,
+        name = excluded.name,
+        role = excluded.role,
+        updated_at = timezone('utc', now());
+
+  return seeded_user_id;
+end;
+$$;
+
+commit;

@@ -3,27 +3,30 @@
 --
 -- What it resets:
 -- 1. FixBee public tables
--- 2. Existing FixBee auth users with @kristujayanti.com email addresses
+-- 2. Existing FixBee auth users with @kristujayanti.com or @fixbee.com email addresses
 --
 -- Note:
 -- Supabase blocks direct SQL deletion from storage.objects.
 -- This script keeps the avatars bucket and recreates its policies safely.
 --
 -- Default accounts created by this script:
--- user@kristujayanti.com   / User@12345
--- worker@kristujayanti.com / Worker@12345
--- admin@kristujayanti.com  / Admin@12345
+-- user@fixbee.com        / User@12345
+-- worker@fixbee.com      / Worker@12345
+-- admin@fixbee.com       / Admin@12345
+-- worker.one@fixbee.com  / Worker@12345
+-- worker.two@fixbee.com  / Worker@12345
+-- worker.three@fixbee.com / Worker@12345
 --
 -- Manual steps after this SQL:
 -- 1. Authentication -> URL Configuration -> Site URL = your frontend URL
--- 2. Authentication -> URL Configuration -> Redirect URLs = add YOUR_FRONTEND_URL/reset-password
--- 3. Authentication -> Providers -> Email = enabled
--- 4. If you want instant signup without email confirmation, turn off "Confirm email"
+-- 2. Authentication -> Providers -> Email = enabled
+-- 3. If you want instant signup without email confirmation, turn off "Confirm email"
 
 create schema if not exists extensions;
 create extension if not exists pgcrypto with schema extensions;
 
 drop trigger if exists enforce_kristujayanti_email on auth.users;
+drop trigger if exists enforce_fixbee_email on auth.users;
 drop trigger if exists on_auth_user_created on auth.users;
 drop trigger if exists on_auth_user_saved on auth.users;
 
@@ -46,6 +49,7 @@ drop function if exists public.clear_booking_history_for_role_items(text, uuid[]
 drop function if exists public.clear_booking_history_for_current_role(text, text[]) cascade;
 drop function if exists public.handle_new_user() cascade;
 drop function if exists public.require_kristujayanti_email() cascade;
+drop function if exists public.require_fixbee_email() cascade;
 drop function if exists public.is_admin() cascade;
 drop function if exists public.set_updated_at() cascade;
 drop function if exists public.normalize_role(text) cascade;
@@ -59,12 +63,14 @@ begin
   select coalesce(array_agg(id), '{}'::uuid[])
   into target_user_ids
   from auth.users
-  where lower(coalesce(email, '')) like '%@kristujayanti.com';
+  where lower(coalesce(email, '')) like '%@kristujayanti.com'
+     or lower(coalesce(email, '')) like '%@fixbee.com';
 
   select coalesce(array_agg(id::text), '{}'::text[])
   into target_user_ids_text
   from auth.users
-  where lower(coalesce(email, '')) like '%@kristujayanti.com';
+  where lower(coalesce(email, '')) like '%@kristujayanti.com'
+     or lower(coalesce(email, '')) like '%@fixbee.com';
 
   if coalesce(array_length(target_user_ids, 1), 0) > 0 then
     if to_regclass('auth.mfa_challenges') is not null and to_regclass('auth.mfa_factors') is not null then
@@ -139,23 +145,6 @@ begin
 end;
 $$;
 
-create or replace function public.require_kristujayanti_email()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  new.email := lower(trim(coalesce(new.email, '')));
-
-  if new.email = '' or right(new.email, length('@kristujayanti.com')) <> '@kristujayanti.com' then
-    raise exception 'Only @kristujayanti.com email addresses are allowed.';
-  end if;
-
-  return new;
-end;
-$$;
-
 create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   email text not null unique,
@@ -166,10 +155,7 @@ create table public.profiles (
   avatar text,
   avatar_url text,
   created_at timestamptz not null default timezone('utc', now()),
-  updated_at timestamptz not null default timezone('utc', now()),
-  constraint profiles_email_domain_check check (
-    right(lower(email), length('@kristujayanti.com')) = '@kristujayanti.com'
-  )
+  updated_at timestamptz not null default timezone('utc', now())
 );
 
 create table public.services (
@@ -698,10 +684,6 @@ create trigger reviews_set_updated_at
 before update on public.reviews
 for each row execute procedure public.set_updated_at();
 
-create trigger enforce_kristujayanti_email
-before insert or update of email on auth.users
-for each row execute procedure public.require_kristujayanti_email();
-
 create trigger on_auth_user_saved
 after insert or update of email, raw_user_meta_data on auth.users
 for each row execute procedure public.handle_new_user();
@@ -722,20 +704,14 @@ create policy "profiles_insert_own"
 on public.profiles
 for insert
 to authenticated
-with check (
-  auth.uid() = id
-  and right(lower(email), length('@kristujayanti.com')) = '@kristujayanti.com'
-);
+with check (auth.uid() = id);
 
 create policy "profiles_update_own_or_admin"
 on public.profiles
 for update
 to authenticated
 using (auth.uid() = id or public.is_admin())
-with check (
-  (auth.uid() = id or public.is_admin())
-  and right(lower(email), length('@kristujayanti.com')) = '@kristujayanti.com'
-);
+with check (auth.uid() = id or public.is_admin());
 
 create policy "services_select_authenticated"
 on public.services
@@ -888,10 +864,6 @@ declare
   normalized_role text := public.normalize_role(seed_role);
   seeded_user_id uuid;
 begin
-  if right(normalized_email, length('@kristujayanti.com')) <> '@kristujayanti.com' then
-    raise exception 'Seeded users must use @kristujayanti.com emails.';
-  end if;
-
   select id
   into seeded_user_id
   from auth.users
@@ -988,12 +960,12 @@ begin
 end;
 $$;
 
-select public.seed_auth_user('user@kristujayanti.com', 'User@12345', 'Default User', 'user');
-select public.seed_auth_user('worker@kristujayanti.com', 'Worker@12345', 'Default Worker', 'worker');
-select public.seed_auth_user('worker.one@kristujayanti.com', 'Worker@12345', 'Arun Das', 'worker');
-select public.seed_auth_user('worker.two@kristujayanti.com', 'Worker@12345', 'Meera Joseph', 'worker');
-select public.seed_auth_user('worker.three@kristujayanti.com', 'Worker@12345', 'Rafi Paul', 'worker');
-select public.seed_auth_user('admin@kristujayanti.com', 'Admin@12345', 'Operations Admin', 'admin');
+select public.seed_auth_user('user@fixbee.com', 'User@12345', 'Default User', 'user');
+select public.seed_auth_user('worker@fixbee.com', 'Worker@12345', 'Default Worker', 'worker');
+select public.seed_auth_user('worker.one@fixbee.com', 'Worker@12345', 'Arun Das', 'worker');
+select public.seed_auth_user('worker.two@fixbee.com', 'Worker@12345', 'Meera Joseph', 'worker');
+select public.seed_auth_user('worker.three@fixbee.com', 'Worker@12345', 'Rafi Paul', 'worker');
+select public.seed_auth_user('admin@fixbee.com', 'Admin@12345', 'Operations Admin', 'admin');
 
 insert into public.services (slug, name, category, description, price, active, rating, reviews_count)
 values
@@ -1024,8 +996,8 @@ values
 
 with ids as (
   select
-    (select id from public.profiles where email = 'user@kristujayanti.com') as user_id,
-    (select id from public.profiles where email = 'worker@kristujayanti.com') as worker_id
+    (select id from public.profiles where email = 'user@fixbee.com') as user_id,
+    (select id from public.profiles where email = 'worker@fixbee.com') as worker_id
 )
 insert into public.bookings (user_id, technician_id, service, service_date, service_time, address, status, price, notes)
 select
@@ -1064,8 +1036,8 @@ from ids;
 
 with ids as (
   select
-    (select id from public.profiles where email = 'user@kristujayanti.com') as user_id,
-    (select id from public.profiles where email = 'worker@kristujayanti.com') as worker_id
+    (select id from public.profiles where email = 'user@fixbee.com') as user_id,
+    (select id from public.profiles where email = 'worker@fixbee.com') as worker_id
 )
 insert into public.bookings (user_id, technician_id, service, service_date, service_time, address, status, price, notes)
 select
@@ -1112,8 +1084,8 @@ from ids;
 
 with ids as (
   select
-    (select id from public.profiles where email = 'user@kristujayanti.com') as user_id,
-    (select id from public.profiles where email = 'worker@kristujayanti.com') as worker_id
+    (select id from public.profiles where email = 'user@fixbee.com') as user_id,
+    (select id from public.profiles where email = 'worker@fixbee.com') as worker_id
 )
 insert into public.bookings (user_id, technician_id, service, service_date, service_time, address, status, price, notes)
 select

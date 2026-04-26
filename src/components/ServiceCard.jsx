@@ -6,7 +6,7 @@ import { formatCurrency } from "../utils/formatters.js";
 export default function ServiceCard({ service, detailsLink, ctaLabel = "Explore service" }) {
   return (
     <Motion.div
-      whileHover={{ y: -6, rotateX: 3 }}
+      whileHover={{ y: -4 }}
       className="group overflow-hidden rounded-[30px] border border-white/10 bg-[#2b1d10]/70 shadow-[0_18px_80px_rgba(30,20,9,0.28)]"
     >
       <div className="relative h-56 overflow-hidden">
@@ -14,6 +14,8 @@ export default function ServiceCard({ service, detailsLink, ctaLabel = "Explore 
           <img
             src={service.coverImage}
             alt={service.name}
+            loading="lazy"
+            decoding="async"
             className="size-full object-cover transition duration-700 group-hover:scale-105"
           />
         ) : (

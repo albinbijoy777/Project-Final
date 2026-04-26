@@ -1,15 +1,15 @@
 import { useEffect, useState } from "react";
-import { CalendarCheck2, Coins, Save } from "lucide-react";
+import { CalendarCheck2, CalendarRange, Save } from "lucide-react";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
-import { listUserBookings } from "../../services/platformService.js";
+import { listUserBookings, peekUserBookingsCache, subscribeToTable } from "../../services/platformService.js";
 import AvatarUploader from "../../components/AvatarUploader.jsx";
 import StatCard from "../../components/StatCard.jsx";
-import { formatCompactNumber } from "../../utils/formatters.js";
 
 export default function UserProfilePage() {
   const { profile, updateProfile, updateAvatar, user } = useAuth();
   const { pushToast } = useToast();
+  const cachedBookings = peekUserBookingsCache(user?.id);
   const [form, setForm] = useState({
     name: "",
     phone: "",
@@ -17,9 +17,9 @@ export default function UserProfilePage() {
   });
   const [saving, setSaving] = useState(false);
   const [stats, setStats] = useState({
-    rewardBalance: 0,
+    upcomingBookings: cachedBookings?.filter((booking) => booking.status !== "completed").length || 0,
     completedJobs: 0,
-    totalBookings: 0,
+    totalBookings: cachedBookings?.length || 0,
   });
 
   useEffect(() => {
@@ -31,24 +31,26 @@ export default function UserProfilePage() {
   }, [profile?.address, profile?.name, profile?.phone]);
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id) return undefined;
 
     async function loadStats() {
       const bookings = await listUserBookings(user.id);
-      const rewardBalance = bookings.reduce(
-        (total, booking) =>
-          total + (booking.status === "completed" ? booking.rewardCoinsEarned : 0) - booking.rewardCoinsRedeemed,
-        0
-      );
 
       setStats({
-        rewardBalance: Math.max(rewardBalance, 0),
+        upcomingBookings: bookings.filter((booking) => booking.status !== "completed").length,
         completedJobs: bookings.filter((booking) => booking.status === "completed").length,
         totalBookings: bookings.length,
       });
     }
 
     loadStats();
+
+    return subscribeToTable({
+      channelName: `user-profile-bookings-${user.id}`,
+      table: "bookings",
+      filter: `user_id=eq.${user.id}`,
+      onChange: () => loadStats(),
+    });
   }, [user?.id]);
 
   function handleChange(event) {
@@ -100,10 +102,10 @@ export default function UserProfilePage() {
     <div className="space-y-6">
       <div className="dashboard-grid">
         <StatCard
-          icon={Coins}
-          label="Reward wallet"
-          value={formatCompactNumber(stats.rewardBalance)}
-          hint="Redeemable service coins"
+          icon={CalendarRange}
+          label="Upcoming bookings"
+          value={stats.upcomingBookings}
+          hint="Active and upcoming visits"
           accent="from-amber-300 to-orange-400"
         />
         <StatCard

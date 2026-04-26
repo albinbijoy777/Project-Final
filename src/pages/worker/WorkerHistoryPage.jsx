@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { Download, Search, Trash2 } from "lucide-react";
-import { clearBookingHistoryForRole, listWorkerBookings, subscribeToTable } from "../../services/platformService.js";
+import {
+  clearBookingHistoryForRole,
+  listWorkerBookings,
+  peekWorkerBookingsCache,
+  subscribeToTable,
+} from "../../services/platformService.js";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
 import LoadingPanel from "../../components/LoadingPanel.jsx";
@@ -18,8 +23,9 @@ import {
 export default function WorkerHistoryPage() {
   const { user } = useAuth();
   const { pushToast } = useToast();
-  const [history, setHistory] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cachedHistory = peekWorkerBookingsCache(user?.id);
+  const [history, setHistory] = useState(cachedHistory || []);
+  const [loading, setLoading] = useState(cachedHistory === undefined);
   const [filter, setFilter] = useState("completed");
   const [search, setSearch] = useState("");
   const [dateFilter, setDateFilter] = useState("");
@@ -43,7 +49,7 @@ export default function WorkerHistoryPage() {
       }
     }
 
-    load(true);
+    load(cachedHistory === undefined);
 
     return subscribeToTable({
       channelName: `worker-history-${user.id}`,
@@ -51,7 +57,7 @@ export default function WorkerHistoryPage() {
       filter: `technician_id=eq.${user.id}`,
       onChange: () => load(false),
     });
-  }, [user?.id]);
+  }, [cachedHistory, user?.id]);
 
   function exportHistory() {
     downloadCsv(

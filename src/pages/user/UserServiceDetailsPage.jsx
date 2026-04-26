@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowRight, CircleHelp, MapPin, ShieldCheck, Star, TicketPercent } from "lucide-react";
-import { getServiceById, listServiceReviews, listServices } from "../../services/platformService.js";
+import {
+  getServiceById,
+  listServiceReviews,
+  listServices,
+  peekServiceCache,
+  subscribeToTable,
+} from "../../services/platformService.js";
 import LoadingPanel from "../../components/LoadingPanel.jsx";
 import SectionHeading from "../../components/SectionHeading.jsx";
 import ServiceCard from "../../components/ServiceCard.jsx";
@@ -9,20 +15,28 @@ import { formatCurrency } from "../../utils/formatters.js";
 
 export default function UserServiceDetailsPage() {
   const { serviceId } = useParams();
-  const [service, setService] = useState(null);
+  const cachedService = peekServiceCache(serviceId);
+  const [service, setService] = useState(cachedService || null);
   const [reviews, setReviews] = useState([]);
   const [relatedServices, setRelatedServices] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cachedService);
 
   useEffect(() => {
+    let active = true;
+
     async function load() {
-      setLoading(true);
+      if (!cachedService) {
+        setLoading(true);
+      }
+
       try {
         const [serviceData, servicesData] = await Promise.all([
           getServiceById(serviceId),
           listServices(),
         ]);
         const reviewsData = await listServiceReviews(serviceData.name);
+        if (!active) return;
+
         setService(serviceData);
         setReviews(reviewsData);
         setRelatedServices(
@@ -31,12 +45,36 @@ export default function UserServiceDetailsPage() {
             .slice(0, 3)
         );
       } finally {
-        setLoading(false);
+        if (active) {
+          setLoading(false);
+        }
       }
     }
 
     load();
-  }, [serviceId]);
+
+    const stopServices = subscribeToTable({
+      channelName: `service-details-${serviceId}`,
+      table: "services",
+      onChange: () => load(),
+    });
+    const stopReviews = subscribeToTable({
+      channelName: `service-reviews-${serviceId}`,
+      table: "reviews",
+      onChange: (payload) => {
+        const payloadService = payload?.new?.service || payload?.old?.service;
+        if (!payloadService || !service?.name || payloadService === service.name) {
+          load();
+        }
+      },
+    });
+
+    return () => {
+      active = false;
+      stopServices?.();
+      stopReviews?.();
+    };
+  }, [cachedService, service?.name, serviceId]);
 
   if (loading || !service) {
     return <LoadingPanel rows={4} />;
@@ -46,10 +84,14 @@ export default function UserServiceDetailsPage() {
     <div className="space-y-6">
       <section className="panel overflow-hidden rounded-[34px]">
         <div className="relative">
-          {service.videoUrl ? (
-            <video className="h-72 w-full object-cover opacity-45" autoPlay muted loop playsInline>
-              <source src={service.videoUrl} type="video/mp4" />
-            </video>
+          {service.coverImage ? (
+            <img
+              src={service.coverImage}
+              alt={service.name}
+              className="h-72 w-full object-cover opacity-45"
+              loading="eager"
+              decoding="async"
+            />
           ) : (
             <div className="h-72 w-full bg-gradient-to-br from-cyan-400/20 via-sky-500/15 to-teal-400/10" />
           )}
@@ -75,7 +117,7 @@ export default function UserServiceDetailsPage() {
 
       <div className="dashboard-grid">
         <InfoCard icon={Star} label="Service rating" value={`${service.rating} / 5`} hint={`${service.reviewsCount}+ verified reviews`} />
-        <InfoCard icon={TicketPercent} label="Offer code" value={service.discountCode} hint={`${service.rewardCoins} reward coins available`} />
+        <InfoCard icon={TicketPercent} label="Offer code" value={service.discountCode} hint="Apply this code at checkout for the live discount" />
         <InfoCard icon={MapPin} label="Live coverage" value={service.locations?.slice(0, 3).join(", ")} hint="Location-based availability checks" />
         <InfoCard icon={ShieldCheck} label="Base pricing" value={formatCurrency(service.price)} hint="Transparent service estimate" />
       </div>

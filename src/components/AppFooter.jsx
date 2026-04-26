@@ -58,8 +58,8 @@ export default function AppFooter() {
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">Platform notes</p>
             <div className="mt-4 space-y-3 text-sm text-slate-300">
               <p>Customer, worker, and admin dashboards</p>
-              <p>Secure password reset by email</p>
-              <p>@kristujayanti.com access only</p>
+              <p>Open email signup and login</p>
+              <p>Live booking, worker, and admin sync</p>
             </div>
             <a href="mailto:albinbijoy4321@gmail.com" className="mt-4 inline-flex items-center gap-2 text-sm text-amber-200">
               Talk to the operations team

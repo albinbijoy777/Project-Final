@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Activity, CalendarRange, Coins, Sparkles } from "lucide-react";
-import { listServices, listUserBookings, subscribeToTable } from "../../services/platformService.js";
+import { Activity, BriefcaseBusiness, CalendarRange, Sparkles, TicketPercent } from "lucide-react";
+import {
+  listServices,
+  listUserBookings,
+  peekServicesCache,
+  peekUserBookingsCache,
+  subscribeToTable,
+} from "../../services/platformService.js";
 import { useAuth } from "../../context/AuthContext.jsx";
 import LoadingPanel from "../../components/LoadingPanel.jsx";
 import SectionHeading from "../../components/SectionHeading.jsx";
@@ -12,9 +18,11 @@ import { formatCompactNumber, formatCurrency, formatDateTime } from "../../utils
 
 export default function UserOverviewPage() {
   const { user } = useAuth();
-  const [services, setServices] = useState([]);
-  const [bookings, setBookings] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cachedServices = peekServicesCache();
+  const cachedBookings = peekUserBookingsCache(user?.id);
+  const [services, setServices] = useState(cachedServices || []);
+  const [bookings, setBookings] = useState(cachedBookings || []);
+  const [loading, setLoading] = useState(!(cachedServices !== undefined && cachedBookings !== undefined));
 
   useEffect(() => {
     if (!user?.id) return undefined;
@@ -38,7 +46,7 @@ export default function UserOverviewPage() {
       }
     }
 
-    load(true);
+    load(cachedServices === undefined || cachedBookings === undefined);
 
     const stopBookings = subscribeToTable({
       channelName: `user-bookings-${user.id}`,
@@ -57,14 +65,11 @@ export default function UserOverviewPage() {
       stopBookings?.();
       stopServices?.();
     };
-  }, [user?.id]);
+  }, [cachedBookings, cachedServices, user?.id]);
 
   const upcomingBookings = bookings.filter((booking) => booking.status !== "completed");
   const completedBookings = bookings.filter((booking) => booking.status === "completed");
-  const rewardBalance = bookings.reduce(
-    (total, booking) => total + (booking.status === "completed" ? booking.rewardCoinsEarned : 0) - booking.rewardCoinsRedeemed,
-    0
-  );
+  const assignedWorkerCount = bookings.filter((booking) => booking.assignedWorkerName).length;
 
   if (loading) {
     return (
@@ -85,10 +90,10 @@ export default function UserOverviewPage() {
           hint="Live assignments and pending visits"
         />
         <StatCard
-          icon={Coins}
-          label="Reward balance"
-          value={formatCompactNumber(Math.max(rewardBalance, 0))}
-          hint="Coins earned from completed bookings"
+          icon={BriefcaseBusiness}
+          label="Assigned workers"
+          value={formatCompactNumber(assignedWorkerCount)}
+          hint="Bookings with a named worker attached"
           accent="from-amber-300 to-orange-400"
         />
         <StatCard
@@ -110,7 +115,7 @@ export default function UserOverviewPage() {
       <SectionHeading
         eyebrow="For you"
         title="Featured home services"
-        description="Live pricing, rewards, availability, and assignment-ready service categories."
+        description="Live pricing, coupon offers, availability, and assignment-ready service categories."
         action={
           <Link
             to="/user/services"
@@ -153,6 +158,12 @@ export default function UserOverviewPage() {
                         {formatDateTime(booking.service_date, booking.service_time)}
                       </p>
                       <p className="mt-2 text-sm leading-6 text-slate-500">{booking.address}</p>
+                      <p className="mt-2 text-sm text-slate-300">
+                        {booking.assignedWorkerName ? `Worker: ${booking.assignedWorkerName}` : "Worker: waiting for assignment"}
+                      </p>
+                      {booking.latestTimelineEntry?.note ? (
+                        <p className="mt-2 text-sm leading-6 text-slate-400">{booking.latestTimelineEntry.note}</p>
+                      ) : null}
                     </div>
                     <div className="flex flex-col items-start gap-3 sm:items-end">
                       <StatusBadge status={booking.status} />
@@ -170,10 +181,10 @@ export default function UserOverviewPage() {
         </div>
 
         <div className="panel rounded-[30px] p-6">
-          <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Reward and promo engine</p>
-          <h3 className="mt-3 text-2xl font-semibold text-white">Use rewards to reduce checkout costs</h3>
+          <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Coupons and offers</p>
+          <h3 className="mt-3 text-2xl font-semibold text-white">Apply valid coupon codes at checkout</h3>
           <p className="mt-3 text-sm leading-7 text-slate-400">
-            Completed jobs add reward coins automatically. Promo codes and coins are applied inside booking checkout.
+            Each service can carry its own coupon code. Enter the exact code during checkout to get the discount.
           </p>
 
           <div className="mt-6 space-y-4">
@@ -185,7 +196,7 @@ export default function UserOverviewPage() {
                     <p className="mt-2 text-sm text-slate-400">Promo: {service.discountCode}</p>
                   </div>
                   <div className="rounded-2xl bg-amber-400/10 px-3 py-2 text-sm font-semibold text-amber-200">
-                    +{service.rewardCoins} coins
+                    <TicketPercent className="size-4" />
                   </div>
                 </div>
               </div>

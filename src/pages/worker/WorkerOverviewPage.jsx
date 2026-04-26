@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, ClipboardList, PlayCircle, Search, TimerReset, Trash2 } from "lucide-react";
 import {
-  cancelBookingForCurrentRole,
   clearBookingHistoryForRole,
   listWorkerBookings,
+  peekWorkerBookingsCache,
   requestBookingRescheduleForCurrentRole,
   subscribeToTable,
   updateBookingStatus,
@@ -33,8 +33,9 @@ const NEXT_ACTIONS = {
 export default function WorkerOverviewPage() {
   const { user, profile } = useAuth();
   const { pushToast } = useToast();
-  const [bookings, setBookings] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cachedBookings = peekWorkerBookingsCache(user?.id);
+  const [bookings, setBookings] = useState(cachedBookings || []);
+  const [loading, setLoading] = useState(cachedBookings === undefined);
   const [updatingId, setUpdatingId] = useState(null);
   const [filter, setFilter] = useState("booked");
   const [search, setSearch] = useState("");
@@ -60,7 +61,7 @@ export default function WorkerOverviewPage() {
       }
     }
 
-    load(true);
+    load(cachedBookings === undefined);
 
     return subscribeToTable({
       channelName: `worker-bookings-${user.id}`,
@@ -68,7 +69,7 @@ export default function WorkerOverviewPage() {
       filter: `technician_id=eq.${user.id}`,
       onChange: () => load(false),
     });
-  }, [user?.id]);
+  }, [cachedBookings, user?.id]);
 
   async function handleStatusChange(booking, nextStatus) {
     setUpdatingId(booking.id);
@@ -118,31 +119,6 @@ export default function WorkerOverviewPage() {
         message: error.message || "Unable to clean the worker history right now.",
         type: "error",
       });
-    }
-  }
-
-  async function handleCancelBooking(booking) {
-    const reason = window.prompt("Why are you cancelling this assignment?", "");
-    if (reason === null) return;
-
-    setUpdatingId(booking.id);
-
-    try {
-      const updated = await cancelBookingForCurrentRole(booking.id, profile?.name || "Worker", reason);
-      setBookings((current) => current.map((item) => (item.id === booking.id ? updated : item)));
-      pushToast({
-        title: "Assignment cancelled",
-        message: "The user has been notified about the cancellation.",
-        type: "success",
-      });
-    } catch (error) {
-      pushToast({
-        title: "Cancellation failed",
-        message: error.message || "Unable to cancel this assignment right now.",
-        type: "error",
-      });
-    } finally {
-      setUpdatingId(null);
     }
   }
 
@@ -340,16 +316,6 @@ export default function WorkerOverviewPage() {
                               : "Request reschedule"}
                         </button>
                       ) : null}
-                      {!["completed", "cancelled"].includes(booking.status) ? (
-                        <button
-                          type="button"
-                          onClick={() => handleCancelBooking(booking)}
-                          disabled={updatingId === booking.id}
-                          className="rounded-2xl border border-rose-200/15 bg-rose-400/8 px-4 py-3 text-sm font-semibold text-rose-100 transition hover:bg-rose-400/12 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {updatingId === booking.id ? "Updating..." : "Cancel assignment"}
-                        </button>
-                      ) : null}
                     </div>
                   </div>
                 </div>
@@ -368,7 +334,7 @@ export default function WorkerOverviewPage() {
           <div className="mt-6 space-y-3">
             {[
               "Confirm access details before travel.",
-              "Update the status when you start actual work on site.",
+              "Request admin help if you need reassignment instead of cancelling from the worker side.",
               "Use clear completion notes so users and admins have a clean service history.",
             ].map((item) => (
               <div key={item} className="rounded-[22px] border border-white/8 bg-white/4 px-4 py-3 text-sm text-slate-300">

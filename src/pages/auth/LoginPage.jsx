@@ -10,7 +10,11 @@ import {
 import { motion as Motion } from "framer-motion";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
-import { APPROVED_EMAIL_DOMAIN } from "../../utils/email.js";
+import {
+  getEmailFieldLabel,
+  getEmailPlaceholder,
+  getEmailRuleText,
+} from "../../utils/email.js";
 import { getDashboardPath } from "../../utils/routes.js";
 import AppFooter from "../../components/AppFooter.jsx";
 
@@ -123,7 +127,7 @@ export default function LoginPage() {
 
               <div className="mt-16 max-w-2xl">
                 <span className="inline-flex rounded-full border border-amber-200/20 bg-amber-300/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.22em] text-amber-100">
-                  Kristu Jayanti only
+                  Open sign in
                 </span>
                 <h1 className="mt-6 text-4xl font-semibold leading-tight text-white sm:text-5xl">
                   Home services that feel organized from the first login.
@@ -153,7 +157,7 @@ export default function LoginPage() {
                 <p className="text-sm uppercase tracking-[0.28em] text-slate-500">Sign in</p>
                 <h2 className="mt-3 text-3xl font-semibold text-white">Welcome back</h2>
                 <p className="mt-3 text-sm leading-6 text-slate-400">
-                  Use your approved university email to continue to your user, worker, or admin dashboard.
+                  Use your email and password to continue to your user, worker, or admin dashboard.
                 </p>
               </div>
               <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300">
@@ -167,9 +171,9 @@ export default function LoginPage() {
                   <ShieldCheck className="size-5" />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-white">Domain restriction is active</p>
+                  <p className="text-sm font-semibold text-white">Email access is open</p>
                   <p className="mt-2 text-sm leading-6 text-slate-300">
-                    Only <span className="font-medium text-white">{APPROVED_EMAIL_DOMAIN}</span> email addresses can sign in, register, or request password recovery.
+                    {getEmailRuleText()}
                   </p>
                 </div>
               </div>
@@ -177,9 +181,7 @@ export default function LoginPage() {
 
             <form className="mt-8 space-y-4" onSubmit={handleSubmit} autoComplete="off">
               <div>
-                <label className="mb-2 block text-sm text-slate-300" htmlFor="email">
-                  University email
-                </label>
+                <label className="mb-2 block text-sm text-slate-300" htmlFor="email">{getEmailFieldLabel()}</label>
                 <input
                   ref={emailRef}
                   id="email"
@@ -189,20 +191,15 @@ export default function LoginPage() {
                   value={form.email}
                   onChange={handleChange}
                   className="input-shell w-full rounded-2xl px-4 py-3.5"
-                  placeholder={`name${APPROVED_EMAIL_DOMAIN}`}
+                  placeholder={getEmailPlaceholder()}
                   autoComplete="off"
                   spellCheck="false"
                 />
               </div>
               <div>
-                <div className="mb-2 flex items-center justify-between gap-4">
-                  <label className="block text-sm text-slate-300" htmlFor="password">
-                    Password
-                  </label>
-                  {/*<Link to="/forgot-password" className="text-sm text-amber-200 transition hover:text-amber-100">
-                    Forgot password?
-                  </Link>*/}
-                </div>
+                <label className="mb-2 block text-sm text-slate-300" htmlFor="password">
+                  Password
+                </label>
                 <input
                   ref={passwordRef}
                   id="password"
