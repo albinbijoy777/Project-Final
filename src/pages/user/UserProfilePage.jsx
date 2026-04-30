@@ -5,6 +5,10 @@ import { useToast } from "../../context/ToastContext.jsx";
 import { listUserBookings, peekUserBookingsCache, subscribeToTable } from "../../services/platformService.js";
 import AvatarUploader from "../../components/AvatarUploader.jsx";
 import StatCard from "../../components/StatCard.jsx";
+import WorkerCoverageFields from "../../components/WorkerCoverageFields.jsx";
+import { extractGooglePlaceSelection } from "../../utils/location.js";
+import { getDistrictsForState } from "../../data/indiaLocations.js";
+import { isPendingWorkerApplication, isRejectedWorkerApplication } from "../../utils/profile.js";
 
 export default function UserProfilePage() {
   const { profile, updateProfile, updateAvatar, user } = useAuth();
@@ -14,6 +18,12 @@ export default function UserProfilePage() {
     name: "",
     phone: "",
     address: "",
+    workerServiceState: "",
+    workerServiceDistricts: [],
+    workerServiceLocation: "",
+    workerServicePlaceId: "",
+    workerServiceLatitude: "",
+    workerServiceLongitude: "",
   });
   const [saving, setSaving] = useState(false);
   const [stats, setStats] = useState({
@@ -27,8 +37,24 @@ export default function UserProfilePage() {
       name: profile?.name || "",
       phone: profile?.phone || "",
       address: profile?.address || "",
+      workerServiceState: profile?.worker_service_state || "",
+      workerServiceDistricts: profile?.worker_service_districts || [],
+      workerServiceLocation: profile?.worker_service_location || "",
+      workerServicePlaceId: profile?.worker_service_place_id || "",
+      workerServiceLatitude: profile?.worker_service_latitude || "",
+      workerServiceLongitude: profile?.worker_service_longitude || "",
     });
-  }, [profile?.address, profile?.name, profile?.phone]);
+  }, [
+    profile?.address,
+    profile?.name,
+    profile?.phone,
+    profile?.worker_service_districts,
+    profile?.worker_service_latitude,
+    profile?.worker_service_location,
+    profile?.worker_service_longitude,
+    profile?.worker_service_place_id,
+    profile?.worker_service_state,
+  ]);
 
   useEffect(() => {
     if (!user?.id) return undefined;
@@ -60,14 +86,92 @@ export default function UserProfilePage() {
     }));
   }
 
+  function handleWorkerStateChange(nextState) {
+    const nextDistrictOptions = getDistrictsForState(nextState);
+    setForm((current) => ({
+      ...current,
+      workerServiceState: nextState,
+      workerServiceDistricts: current.workerServiceDistricts.filter((district) =>
+        nextDistrictOptions.includes(district)
+      ).length
+        ? current.workerServiceDistricts.filter((district) => nextDistrictOptions.includes(district))
+        : nextDistrictOptions.slice(0, 1),
+    }));
+  }
+
+  function handleWorkerDistrictToggle(nextDistrict) {
+    setForm((current) => {
+      const alreadySelected = current.workerServiceDistricts.includes(nextDistrict);
+
+      if (alreadySelected && current.workerServiceDistricts.length === 1) {
+        return current;
+      }
+
+      return {
+        ...current,
+        workerServiceDistricts: alreadySelected
+          ? current.workerServiceDistricts.filter((district) => district !== nextDistrict)
+          : [...current.workerServiceDistricts, nextDistrict],
+      };
+    });
+  }
+
+  function handleWorkerPlaceSelect(place) {
+    const nextSelection = extractGooglePlaceSelection(place);
+    setForm((current) => ({
+      ...current,
+      workerServiceState: nextSelection.state || current.workerServiceState,
+      workerServiceDistricts: nextSelection.districts.length
+        ? nextSelection.districts
+        : current.workerServiceDistricts,
+      workerServiceLocation: nextSelection.locationText,
+      workerServicePlaceId: nextSelection.placeId,
+      workerServiceLatitude: nextSelection.latitude,
+      workerServiceLongitude: nextSelection.longitude,
+    }));
+  }
+
   async function handleSave(event) {
     event.preventDefault();
+    const workerApplicationOpen =
+      profile?.role === "user" &&
+      (isPendingWorkerApplication(profile) || isRejectedWorkerApplication(profile));
+
+    if (workerApplicationOpen && !form.workerServiceDistricts.length) {
+      pushToast({
+        title: "Select a worker district",
+        message: "Choose at least one district before saving the worker application details.",
+        type: "error",
+      });
+      return;
+    }
+
     setSaving(true);
     try {
-      await updateProfile(form);
+      await updateProfile({
+        name: form.name,
+        phone: form.phone,
+        address: form.address,
+        ...(workerApplicationOpen
+          ? {
+              workerServiceState: form.workerServiceState,
+              workerServiceDistricts: form.workerServiceDistricts,
+              workerServiceLocation: form.workerServiceLocation,
+              workerServicePlaceId: form.workerServicePlaceId,
+              workerServiceLatitude: form.workerServiceLatitude,
+              workerServiceLongitude: form.workerServiceLongitude,
+              workerApplicationStatus: "pending",
+              workerApplicationNote: "",
+              workerApplicationSubmittedAt: new Date().toISOString(),
+              workerReviewedAt: null,
+            }
+          : {}),
+      });
       pushToast({
-        title: "Profile saved",
-        message: "Your name, phone number, and address are updated in real time.",
+        title: workerApplicationOpen ? "Application updated" : "Profile saved",
+        message: workerApplicationOpen
+          ? "Your worker application details were updated and moved back into the admin review queue."
+          : "Your name, phone number, and address are updated in real time.",
         type: "success",
       });
     } catch (error) {
@@ -97,6 +201,10 @@ export default function UserProfilePage() {
       });
     }
   }
+
+  const workerApplicationOpen =
+    profile?.role === "user" &&
+    (isPendingWorkerApplication(profile) || isRejectedWorkerApplication(profile));
 
   return (
     <div className="space-y-6">
@@ -157,6 +265,28 @@ export default function UserProfilePage() {
                 className="input-shell w-full rounded-2xl px-4 py-3.5"
               />
             </div>
+            {workerApplicationOpen ? (
+              <WorkerCoverageFields
+                state={form.workerServiceState}
+                districts={form.workerServiceDistricts}
+                locationText={form.workerServiceLocation}
+                onStateChange={handleWorkerStateChange}
+                onDistrictToggle={handleWorkerDistrictToggle}
+                onLocationTextChange={(value) =>
+                  setForm((current) => ({
+                    ...current,
+                    workerServiceLocation: value,
+                  }))
+                }
+                onPlaceSelect={handleWorkerPlaceSelect}
+                title="Worker application coverage"
+                description={
+                  isPendingWorkerApplication(profile)
+                    ? "Your worker request is waiting for admin approval. Keep the service area accurate so jobs can be matched correctly."
+                    : "Update the coverage details below and save to resubmit your worker application."
+                }
+              />
+            ) : null}
           </div>
 
           <button

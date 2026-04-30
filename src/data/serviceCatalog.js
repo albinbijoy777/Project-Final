@@ -43,6 +43,8 @@ const SERVICE_MEDIA = {
   },
 };
 
+const LIVE_SERVICE_LOCATIONS = ["Kerala", "Karnataka", "Selected districts"];
+
 export const SERVICE_BLUEPRINTS = [
   {
     slug: "electrician",
@@ -56,7 +58,7 @@ export const SERVICE_BLUEPRINTS = [
     reviewsCount: 2140,
     rewardCoins: 30,
     discountCode: "SPARK150",
-    locations: ["Bengaluru", "Mumbai", "Chennai", "Hyderabad", "Delhi NCR"],
+    locations: LIVE_SERVICE_LOCATIONS,
     highlights: ["30-minute callback", "Background-verified experts", "7-day workmanship support"],
     includes: ["Switch and socket repair", "Fan and light installation", "MCB and wiring diagnostics"],
     howItWorks: [
@@ -91,7 +93,7 @@ export const SERVICE_BLUEPRINTS = [
     reviewsCount: 1894,
     rewardCoins: 28,
     discountCode: "FLOW10",
-    locations: ["Bengaluru", "Pune", "Mumbai", "Delhi NCR", "Kochi"],
+    locations: LIVE_SERVICE_LOCATIONS,
     highlights: ["Emergency same-day slots", "Material checklist before arrival", "Water damage-first response"],
     includes: ["Tap and faucet installation", "Leak detection", "Sink and drain service"],
     howItWorks: [
@@ -126,7 +128,7 @@ export const SERVICE_BLUEPRINTS = [
     reviewsCount: 1320,
     rewardCoins: 35,
     discountCode: "WOOD200",
-    locations: ["Bengaluru", "Mumbai", "Chennai", "Ahmedabad"],
+    locations: LIVE_SERVICE_LOCATIONS,
     highlights: ["Precision tools included", "Before and after quality checks", "Office and residential jobs"],
     includes: ["Wardrobe adjustments", "Shelf mounting", "Furniture repair and assembly"],
     howItWorks: [
@@ -161,7 +163,7 @@ export const SERVICE_BLUEPRINTS = [
     reviewsCount: 980,
     rewardCoins: 45,
     discountCode: "KITCHEN15",
-    locations: ["Bengaluru", "Mumbai", "Hyderabad", "Delhi NCR"],
+    locations: LIVE_SERVICE_LOCATIONS,
     highlights: ["Eco-safe chemicals", "Appliance surface care", "Weekend-ready slots"],
     includes: ["Countertop sanitation", "Cabinet exterior cleaning", "Sink, stove, and backsplash detailing"],
     howItWorks: [
@@ -196,7 +198,7 @@ export const SERVICE_BLUEPRINTS = [
     reviewsCount: 1575,
     rewardCoins: 60,
     discountCode: "DEEP300",
-    locations: ["Bengaluru", "Mumbai", "Pune", "Hyderabad", "Delhi NCR"],
+    locations: LIVE_SERVICE_LOCATIONS,
     highlights: ["Team-based cleaning crew", "Move-in and move-out ready", "Detailed checklist shared after service"],
     includes: ["Floors and skirting", "Bathroom sanitization", "Furniture surface detailing"],
     howItWorks: [
@@ -231,7 +233,7 @@ export const SERVICE_BLUEPRINTS = [
     reviewsCount: 1710,
     rewardCoins: 38,
     discountCode: "COOL100",
-    locations: ["Bengaluru", "Chennai", "Hyderabad", "Mumbai", "Delhi NCR"],
+    locations: LIVE_SERVICE_LOCATIONS,
     highlights: ["Summer priority queue", "Cooling diagnostics", "Indoor and outdoor unit checks"],
     includes: ["Filter cleaning", "Cooling performance check", "Drainage and noise inspection"],
     howItWorks: [
@@ -266,7 +268,7 @@ export const SERVICE_BLUEPRINTS = [
     reviewsCount: 620,
     rewardCoins: 80,
     discountCode: "PAINT500",
-    locations: ["Bengaluru", "Mumbai", "Delhi NCR", "Pune"],
+    locations: LIVE_SERVICE_LOCATIONS,
     highlights: ["Site inspection ready", "Color consultation notes", "Crew assignment support"],
     includes: ["Surface prep", "Putty and primer guidance", "Final finish review"],
     howItWorks: [

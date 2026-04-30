@@ -382,6 +382,11 @@ export default function UserBookingsPage() {
                   {formatDateTime(booking.service_date, booking.service_time)}
                 </p>
                 <p className="mt-3 text-sm leading-6 text-slate-500">{booking.address}</p>
+                {booking.serviceState || booking.serviceDistrict ? (
+                  <p className="mt-2 text-sm text-slate-300">
+                    Service area: {[booking.serviceDistrict, booking.serviceState].filter(Boolean).join(", ")}
+                  </p>
+                ) : null}
                 <p className="mt-3 text-sm text-slate-300">
                   {booking.assignedWorkerName ? `Assigned worker: ${booking.assignedWorkerName}` : "Assigned worker: waiting for admin assignment"}
                 </p>

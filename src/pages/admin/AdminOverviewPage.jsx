@@ -24,6 +24,7 @@ import LoadingPanel from "../../components/LoadingPanel.jsx";
 import StatCard from "../../components/StatCard.jsx";
 import SectionHeading from "../../components/SectionHeading.jsx";
 import { formatCompactNumber, formatCurrency } from "../../utils/formatters.js";
+import { canWorkerTakeAssignments, isPendingWorkerApplication } from "../../utils/profile.js";
 
 const STATUS_COLORS = ["#38bdf8", "#14b8a6", "#f59e0b", "#fb7185"];
 
@@ -92,6 +93,8 @@ export default function AdminOverviewPage() {
     .reduce((sum, booking) => sum + Number(booking.price || 0), 0);
   const activeUsers = state.profiles.filter((profile) => profile.role === "user").length;
   const workers = state.profiles.filter((profile) => profile.role === "worker").length;
+  const readyWorkers = state.profiles.filter((profile) => canWorkerTakeAssignments(profile)).length;
+  const pendingApplications = state.profiles.filter((profile) => isPendingWorkerApplication(profile)).length;
   const activeServices = state.services.filter((service) => service.active !== false).length;
 
   const statusData = ["pending", "assigned", "in_progress", "completed"].map((status) => ({
@@ -129,7 +132,7 @@ export default function AdminOverviewPage() {
           icon={Users}
           label="Active users"
           value={formatCompactNumber(activeUsers)}
-          hint={`${workers} active workers in dispatch`}
+          hint={`${readyWorkers} ready workers, ${pendingApplications} pending applications`}
           accent="from-sky-300 to-cyan-400"
         />
         <StatCard
@@ -143,7 +146,7 @@ export default function AdminOverviewPage() {
           icon={Activity}
           label="Total bookings"
           value={state.bookings.length}
-          hint="All requests and service history"
+          hint={`${workers} worker accounts tracked across dispatch`}
           accent="from-rose-300 to-orange-300"
         />
       </div>

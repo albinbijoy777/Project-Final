@@ -154,6 +154,17 @@ create table public.profiles (
   address text not null default '',
   avatar text,
   avatar_url text,
+  worker_application_status text not null default 'not_requested' check (worker_application_status in ('not_requested', 'pending', 'approved', 'rejected')),
+  worker_application_note text not null default '',
+  worker_application_submitted_at timestamptz,
+  worker_reviewed_at timestamptz,
+  worker_service_state text not null default '',
+  worker_service_districts text[] not null default '{}',
+  worker_service_location text not null default '',
+  worker_service_place_id text not null default '',
+  worker_service_latitude numeric(10, 7),
+  worker_service_longitude numeric(10, 7),
+  is_accepting_jobs boolean not null default false,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );
@@ -223,6 +234,9 @@ alter default privileges in schema public grant select, insert, update, delete o
 alter default privileges in schema public grant usage, select on sequences to authenticated, service_role;
 
 create index idx_profiles_role on public.profiles(role);
+create index idx_profiles_worker_application_status on public.profiles(worker_application_status);
+create index idx_profiles_worker_service_state on public.profiles(worker_service_state);
+create index idx_profiles_worker_service_districts on public.profiles using gin(worker_service_districts);
 create index idx_services_active on public.services(active);
 create index idx_bookings_user_id on public.bookings(user_id);
 create index idx_bookings_technician_id on public.bookings(technician_id);
@@ -967,6 +981,36 @@ select public.seed_auth_user('worker.two@fixbee.com', 'Worker@12345', 'Meera Jos
 select public.seed_auth_user('worker.three@fixbee.com', 'Worker@12345', 'Rafi Paul', 'worker');
 select public.seed_auth_user('admin@fixbee.com', 'Admin@12345', 'Operations Admin', 'admin');
 
+update public.profiles
+set worker_application_status = 'approved',
+    worker_reviewed_at = timezone('utc', now()),
+    is_accepting_jobs = true
+where role = 'worker';
+
+update public.profiles
+set worker_service_state = 'Karnataka',
+    worker_service_districts = array['Bengaluru Urban', 'Bengaluru Rural'],
+    worker_service_location = 'Kothanur, Bengaluru'
+where lower(email) = 'worker@fixbee.com';
+
+update public.profiles
+set worker_service_state = 'Kerala',
+    worker_service_districts = array['Ernakulam', 'Thrissur', 'Kottayam'],
+    worker_service_location = 'Kaloor, Kochi'
+where lower(email) = 'worker.one@fixbee.com';
+
+update public.profiles
+set worker_service_state = 'Karnataka',
+    worker_service_districts = array['Mysuru', 'Dakshina Kannada', 'Udupi'],
+    worker_service_location = 'Mysuru, Karnataka'
+where lower(email) = 'worker.two@fixbee.com';
+
+update public.profiles
+set worker_service_state = 'Kerala',
+    worker_service_districts = array['Kozhikode', 'Malappuram', 'Kannur'],
+    worker_service_location = 'Kozhikode, Kerala'
+where lower(email) = 'worker.three@fixbee.com';
+
 insert into public.services (slug, name, category, description, price, active, rating, reviews_count)
 values
   ('electrician', 'Electrician', 'Repairs', 'Fast electrical repairs, fan installation, switchboard replacement, and preventive safety checks.', 399, true, 4.8, 2140),
@@ -1006,7 +1050,7 @@ select
   'Plumber',
   current_date + 2,
   '12:30 PM',
-  'Kothanur Main Road, Bengaluru',
+  'Bengaluru Urban - Karnataka - Kothanur Main Road, Bengaluru',
   'pending',
   449,
   jsonb_build_object(
@@ -1017,7 +1061,10 @@ select
     'promoCode', 'FLOW10',
     'rewardCoinsRedeemed', 0,
     'rewardCoinsEarned', 28,
-    'location', 'Kothanur Main Road, Bengaluru',
+    'location', 'Bengaluru Urban - Karnataka - Kothanur Main Road, Bengaluru',
+    'locationText', 'Kothanur Main Road, Bengaluru',
+    'serviceState', 'Karnataka',
+    'serviceDistrict', 'Bengaluru Urban',
     'city', 'Bengaluru',
     'customerName', 'Default User',
     'customerPhone', '+91 9876500001',
@@ -1046,7 +1093,7 @@ select
   'AC Service',
   current_date + 1,
   '10:00 AM',
-  'Kristu Jayanti College Road, Bengaluru',
+  'Bengaluru Urban - Karnataka - Kristu Jayanti College Road, Bengaluru',
   'assigned',
   599,
   jsonb_build_object(
@@ -1057,7 +1104,10 @@ select
     'promoCode', 'COOL100',
     'rewardCoinsRedeemed', 0,
     'rewardCoinsEarned', 38,
-    'location', 'Kristu Jayanti College Road, Bengaluru',
+    'location', 'Bengaluru Urban - Karnataka - Kristu Jayanti College Road, Bengaluru',
+    'locationText', 'Kristu Jayanti College Road, Bengaluru',
+    'serviceState', 'Karnataka',
+    'serviceDistrict', 'Bengaluru Urban',
     'city', 'Bengaluru',
     'customerName', 'Default User',
     'customerPhone', '+91 9876500001',
@@ -1094,7 +1144,7 @@ select
   'Electrician',
   current_date - 3,
   '03:00 PM',
-  'K Narayanapura Main Road, Bengaluru',
+  'Bengaluru Urban - Karnataka - K Narayanapura Main Road, Bengaluru',
   'completed',
   399,
   jsonb_build_object(
@@ -1105,7 +1155,10 @@ select
     'promoCode', null,
     'rewardCoinsRedeemed', 0,
     'rewardCoinsEarned', 30,
-    'location', 'K Narayanapura Main Road, Bengaluru',
+    'location', 'Bengaluru Urban - Karnataka - K Narayanapura Main Road, Bengaluru',
+    'locationText', 'K Narayanapura Main Road, Bengaluru',
+    'serviceState', 'Karnataka',
+    'serviceDistrict', 'Bengaluru Urban',
     'city', 'Bengaluru',
     'customerName', 'Default User',
     'customerPhone', '+91 9876500001',

@@ -277,6 +277,11 @@ export default function WorkerOverviewPage() {
                       </div>
                       <p className="mt-3 text-sm text-slate-400">{formatDateTime(booking.service_date, booking.service_time)}</p>
                       <p className="mt-3 text-sm leading-6 text-slate-500">{booking.address}</p>
+                      {booking.serviceState || booking.serviceDistrict ? (
+                        <p className="mt-2 text-sm text-slate-300">
+                          Service area: {[booking.serviceDistrict, booking.serviceState].filter(Boolean).join(", ")}
+                        </p>
+                      ) : null}
                       {booking.requirementDetails ? (
                         <p className="mt-4 text-sm leading-6 text-slate-400">{booking.requirementDetails}</p>
                       ) : null}

@@ -91,6 +91,72 @@ alter table public.bookings
   add column if not exists hidden_for_worker boolean not null default false,
   add column if not exists hidden_for_admin boolean not null default false;
 
+alter table public.profiles
+  add column if not exists worker_application_status text not null default 'not_requested',
+  add column if not exists worker_application_note text not null default '',
+  add column if not exists worker_application_submitted_at timestamptz,
+  add column if not exists worker_reviewed_at timestamptz,
+  add column if not exists worker_service_state text not null default '',
+  add column if not exists worker_service_districts text[] not null default '{}',
+  add column if not exists worker_service_location text not null default '',
+  add column if not exists worker_service_place_id text not null default '',
+  add column if not exists worker_service_latitude numeric(10, 7),
+  add column if not exists worker_service_longitude numeric(10, 7),
+  add column if not exists is_accepting_jobs boolean not null default false;
+
+alter table public.profiles
+  drop constraint if exists profiles_worker_application_status_check;
+
+alter table public.profiles
+  add constraint profiles_worker_application_status_check
+  check (worker_application_status in ('not_requested', 'pending', 'approved', 'rejected'));
+
+create index if not exists idx_profiles_worker_application_status
+on public.profiles(worker_application_status);
+
+create index if not exists idx_profiles_worker_service_state
+on public.profiles(worker_service_state);
+
+create index if not exists idx_profiles_worker_service_districts
+on public.profiles using gin(worker_service_districts);
+
+update public.profiles
+set worker_application_status = 'approved',
+    worker_reviewed_at = timezone('utc', now()),
+    is_accepting_jobs = true
+where role = 'worker';
+
+update public.profiles
+set worker_service_state = 'Karnataka',
+    worker_service_districts = array['Bengaluru Urban'],
+    worker_service_location = coalesce(nullif(worker_service_location, ''), address, 'Bengaluru Urban, Karnataka')
+where role = 'worker'
+  and coalesce(worker_service_state, '') = '';
+
+update public.profiles
+set worker_service_state = 'Karnataka',
+    worker_service_districts = array['Bengaluru Urban', 'Bengaluru Rural'],
+    worker_service_location = 'Kothanur, Bengaluru'
+where lower(email) = 'worker@fixbee.com';
+
+update public.profiles
+set worker_service_state = 'Kerala',
+    worker_service_districts = array['Ernakulam', 'Thrissur', 'Kottayam'],
+    worker_service_location = 'Kaloor, Kochi'
+where lower(email) = 'worker.one@fixbee.com';
+
+update public.profiles
+set worker_service_state = 'Karnataka',
+    worker_service_districts = array['Mysuru', 'Dakshina Kannada', 'Udupi'],
+    worker_service_location = 'Mysuru, Karnataka'
+where lower(email) = 'worker.two@fixbee.com';
+
+update public.profiles
+set worker_service_state = 'Kerala',
+    worker_service_districts = array['Kozhikode', 'Malappuram', 'Kannur'],
+    worker_service_location = 'Kozhikode, Kerala'
+where lower(email) = 'worker.three@fixbee.com';
+
 drop function if exists public.clear_booking_history_for_current_role(text, text[]);
 
 create or replace function public.clear_booking_history_for_role_items(

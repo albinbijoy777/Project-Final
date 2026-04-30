@@ -5,11 +5,25 @@ import { useToast } from "../../context/ToastContext.jsx";
 import { listWorkerBookings } from "../../services/platformService.js";
 import AvatarUploader from "../../components/AvatarUploader.jsx";
 import StatCard from "../../components/StatCard.jsx";
+import WorkerCoverageFields from "../../components/WorkerCoverageFields.jsx";
+import { extractGooglePlaceSelection } from "../../utils/location.js";
+import { getDistrictsForState } from "../../data/indiaLocations.js";
 
 export default function WorkerProfilePage() {
   const { profile, updateProfile, updateAvatar, user } = useAuth();
   const { pushToast } = useToast();
-  const [form, setForm] = useState({ name: "", phone: "", address: "" });
+  const [form, setForm] = useState({
+    name: "",
+    phone: "",
+    address: "",
+    workerServiceState: "",
+    workerServiceDistricts: [],
+    workerServiceLocation: "",
+    workerServicePlaceId: "",
+    workerServiceLatitude: "",
+    workerServiceLongitude: "",
+    isAcceptingJobs: true,
+  });
   const [saving, setSaving] = useState(false);
   const [jobCount, setJobCount] = useState(0);
 
@@ -18,8 +32,26 @@ export default function WorkerProfilePage() {
       name: profile?.name || "",
       phone: profile?.phone || "",
       address: profile?.address || "",
+      workerServiceState: profile?.worker_service_state || "",
+      workerServiceDistricts: profile?.worker_service_districts || [],
+      workerServiceLocation: profile?.worker_service_location || "",
+      workerServicePlaceId: profile?.worker_service_place_id || "",
+      workerServiceLatitude: profile?.worker_service_latitude || "",
+      workerServiceLongitude: profile?.worker_service_longitude || "",
+      isAcceptingJobs: profile?.is_accepting_jobs !== false,
     });
-  }, [profile?.address, profile?.name, profile?.phone]);
+  }, [
+    profile?.address,
+    profile?.is_accepting_jobs,
+    profile?.name,
+    profile?.phone,
+    profile?.worker_service_districts,
+    profile?.worker_service_latitude,
+    profile?.worker_service_location,
+    profile?.worker_service_longitude,
+    profile?.worker_service_place_id,
+    profile?.worker_service_state,
+  ]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -39,14 +71,80 @@ export default function WorkerProfilePage() {
     }));
   }
 
+  function handleCoverageStateChange(nextState) {
+    const nextDistrictOptions = getDistrictsForState(nextState);
+    setForm((current) => ({
+      ...current,
+      workerServiceState: nextState,
+      workerServiceDistricts: current.workerServiceDistricts.filter((district) =>
+        nextDistrictOptions.includes(district)
+      ).length
+        ? current.workerServiceDistricts.filter((district) => nextDistrictOptions.includes(district))
+        : nextDistrictOptions.slice(0, 1),
+    }));
+  }
+
+  function handleCoverageDistrictToggle(nextDistrict) {
+    setForm((current) => {
+      const alreadySelected = current.workerServiceDistricts.includes(nextDistrict);
+
+      if (alreadySelected && current.workerServiceDistricts.length === 1) {
+        return current;
+      }
+
+      return {
+        ...current,
+        workerServiceDistricts: alreadySelected
+          ? current.workerServiceDistricts.filter((district) => district !== nextDistrict)
+          : [...current.workerServiceDistricts, nextDistrict],
+      };
+    });
+  }
+
+  function handleCoveragePlaceSelect(place) {
+    const nextSelection = extractGooglePlaceSelection(place);
+    setForm((current) => ({
+      ...current,
+      workerServiceState: nextSelection.state || current.workerServiceState,
+      workerServiceDistricts: nextSelection.districts.length
+        ? nextSelection.districts
+        : current.workerServiceDistricts,
+      workerServiceLocation: nextSelection.locationText,
+      workerServicePlaceId: nextSelection.placeId,
+      workerServiceLatitude: nextSelection.latitude,
+      workerServiceLongitude: nextSelection.longitude,
+    }));
+  }
+
   async function handleSave(event) {
     event.preventDefault();
+
+    if (!form.workerServiceState || !form.workerServiceDistricts.length) {
+      pushToast({
+        title: "Coverage area required",
+        message: "Choose at least one district where you can take service requests.",
+        type: "error",
+      });
+      return;
+    }
+
     setSaving(true);
     try {
-      await updateProfile(form);
+      await updateProfile({
+        name: form.name,
+        phone: form.phone,
+        address: form.address,
+        workerServiceState: form.workerServiceState,
+        workerServiceDistricts: form.workerServiceDistricts,
+        workerServiceLocation: form.workerServiceLocation,
+        workerServicePlaceId: form.workerServicePlaceId,
+        workerServiceLatitude: form.workerServiceLatitude,
+        workerServiceLongitude: form.workerServiceLongitude,
+        isAcceptingJobs: form.isAcceptingJobs,
+      });
       pushToast({
         title: "Worker profile saved",
-        message: "Your contact information has been updated in real time.",
+        message: "Your contact details, coverage districts, and live availability are updated in real time.",
         type: "success",
       });
     } catch (error) {
@@ -94,7 +192,7 @@ export default function WorkerProfilePage() {
           <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Worker identity</p>
           <h2 className="mt-3 text-2xl font-semibold text-white">Public worker card</h2>
           <p className="mt-3 text-sm leading-7 text-slate-400">
-            Keep your profile photo and contact details current so admins can route work with confidence.
+            Keep your profile photo, coverage area, and availability current so admin can route work with confidence.
           </p>
           <div className="mt-8">
             <AvatarUploader
@@ -119,6 +217,28 @@ export default function WorkerProfilePage() {
                 className="input-shell w-full rounded-2xl px-4 py-3.5"
               />
             </div>
+            <WorkerCoverageFields
+              state={form.workerServiceState}
+              districts={form.workerServiceDistricts}
+              locationText={form.workerServiceLocation}
+              onStateChange={handleCoverageStateChange}
+              onDistrictToggle={handleCoverageDistrictToggle}
+              onLocationTextChange={(value) =>
+                setForm((current) => ({
+                  ...current,
+                  workerServiceLocation: value,
+                }))
+              }
+              onPlaceSelect={handleCoveragePlaceSelect}
+              availability={form.isAcceptingJobs}
+              onAvailabilityChange={(value) =>
+                setForm((current) => ({
+                  ...current,
+                  isAcceptingJobs: value,
+                }))
+              }
+              showAvailability
+            />
           </div>
 
           <button

@@ -12,13 +12,14 @@ import {
 import { updateProfileAvatar } from "../services/profileMedia.js";
 import { subscribeToTable } from "../services/platformService.js";
 import { normalizeRole } from "../utils/roles.js";
+import { normalizeProfileRecord } from "../utils/profile.js";
 
 const AuthContext = createContext(null);
 
 function buildFallbackProfile(targetUser, existingProfile = null) {
   if (!targetUser) return null;
 
-  return {
+  return normalizeProfileRecord({
     id: targetUser.id,
     email: targetUser.email,
     name:
@@ -31,13 +32,24 @@ function buildFallbackProfile(targetUser, existingProfile = null) {
     address: existingProfile?.address || "",
     avatar: existingProfile?.avatar || existingProfile?.avatar_url || null,
     avatar_url: existingProfile?.avatar_url || existingProfile?.avatar || null,
-  };
+    worker_application_status: existingProfile?.worker_application_status,
+    worker_application_note: existingProfile?.worker_application_note || "",
+    worker_application_submitted_at: existingProfile?.worker_application_submitted_at || null,
+    worker_reviewed_at: existingProfile?.worker_reviewed_at || null,
+    worker_service_state: existingProfile?.worker_service_state || "",
+    worker_service_districts: existingProfile?.worker_service_districts || [],
+    worker_service_location: existingProfile?.worker_service_location || "",
+    worker_service_place_id: existingProfile?.worker_service_place_id || "",
+    worker_service_latitude: existingProfile?.worker_service_latitude || "",
+    worker_service_longitude: existingProfile?.worker_service_longitude || "",
+    is_accepting_jobs: existingProfile?.is_accepting_jobs,
+  });
 }
 
 function buildSignupProfile(user, details = {}) {
   if (!user) return null;
 
-  return {
+  return normalizeProfileRecord({
     id: user.id,
     email: details.email || user.email || "",
     name: details.name || user.user_metadata?.name || user.email?.split("@")[0] || "FixBee User",
@@ -46,7 +58,18 @@ function buildSignupProfile(user, details = {}) {
     address: details.address || "",
     avatar: null,
     avatar_url: null,
-  };
+    worker_application_status: details.worker_application_status,
+    worker_application_note: details.worker_application_note || "",
+    worker_application_submitted_at: details.worker_application_submitted_at || null,
+    worker_reviewed_at: details.worker_reviewed_at || null,
+    worker_service_state: details.worker_service_state || "",
+    worker_service_districts: details.worker_service_districts || [],
+    worker_service_location: details.worker_service_location || "",
+    worker_service_place_id: details.worker_service_place_id || "",
+    worker_service_latitude: details.worker_service_latitude || "",
+    worker_service_longitude: details.worker_service_longitude || "",
+    is_accepting_jobs: details.is_accepting_jobs,
+  });
 }
 
 export function AuthProvider({ children }) {
@@ -63,9 +86,7 @@ export function AuthProvider({ children }) {
 
     try {
       const nextProfile = await ensureProfile(targetUser);
-      const normalizedProfile = nextProfile
-        ? { ...nextProfile, role: normalizeRole(nextProfile.role) }
-        : buildFallbackProfile(targetUser);
+      const normalizedProfile = nextProfile ? normalizeProfileRecord(nextProfile) : buildFallbackProfile(targetUser);
       setProfile(normalizedProfile);
       return normalizedProfile;
     } catch {
@@ -158,10 +179,29 @@ export function AuthProvider({ children }) {
     return nextProfile;
   }
 
-  async function signup({ email, password, name, role, phone, address, avatarFile }) {
-    const authResult = await signUpRequest({ email, password, name, role, phone, address });
+  async function signup(details) {
+    const {
+      email,
+      password,
+      name,
+      role,
+      phone,
+      address,
+      avatarFile,
+      ...restDetails
+    } = details;
+    const authResult = await signUpRequest({
+      email,
+      password,
+      name,
+      role,
+      phone,
+      address,
+      ...restDetails,
+    });
     const nextUser = authResult?.user;
     const requiresEmailConfirmation = !authResult?.session;
+    const nextSignupRole = normalizeRole(role) === "worker" ? "user" : normalizeRole(role);
 
     if (avatarFile && nextUser?.id && !requiresEmailConfirmation) {
       const avatarUrl = await updateProfileAvatar(nextUser.id, avatarFile);
@@ -169,11 +209,12 @@ export function AuthProvider({ children }) {
         id: nextUser.id,
         email,
         name,
-        role: normalizeRole(role),
+        role: nextSignupRole,
         phone,
         address,
         avatar: avatarUrl,
         avatar_url: avatarUrl,
+        ...restDetails,
       });
     }
 
@@ -182,7 +223,7 @@ export function AuthProvider({ children }) {
       setUser(nextUser);
       const nextProfile = await refreshProfile(nextUser);
       return {
-        profile: nextProfile ? { ...nextProfile, role: normalizeRole(nextProfile.role) } : null,
+        profile: nextProfile ? normalizeProfileRecord(nextProfile) : null,
         requiresEmailConfirmation: false,
       };
     }
@@ -192,9 +233,10 @@ export function AuthProvider({ children }) {
         ? buildSignupProfile(nextUser, {
             email,
             name,
-            role,
+            role: nextSignupRole,
             phone,
             address,
+            ...restDetails,
           })
         : null,
       requiresEmailConfirmation,
@@ -209,8 +251,9 @@ export function AuthProvider({ children }) {
       role: profile?.role || "user",
       ...details,
     });
-    setProfile(nextProfile);
-    return nextProfile;
+    const normalizedProfile = normalizeProfileRecord(nextProfile);
+    setProfile(normalizedProfile);
+    return normalizedProfile;
   }
 
   async function updateAvatar(file) {
@@ -223,7 +266,7 @@ export function AuthProvider({ children }) {
       avatar: avatarUrl,
       avatar_url: avatarUrl,
     });
-    setProfile(nextProfile);
+    setProfile(normalizeProfileRecord(nextProfile));
     return avatarUrl;
   }
 

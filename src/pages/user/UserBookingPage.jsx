@@ -7,6 +7,9 @@ import { useToast } from "../../context/ToastContext.jsx";
 import LoadingPanel from "../../components/LoadingPanel.jsx";
 import SectionHeading from "../../components/SectionHeading.jsx";
 import { formatCurrency } from "../../utils/formatters.js";
+import { DEFAULT_SERVICE_DISTRICT, DEFAULT_SERVICE_STATE, getDistrictsForState } from "../../data/indiaLocations.js";
+import { extractGooglePlaceSelection, normalizeLocationSelection } from "../../utils/location.js";
+import GoogleMapsLocationInput from "../../components/GoogleMapsLocationInput.jsx";
 
 const TIME_SLOTS = [
   "08:00 AM",
@@ -27,6 +30,11 @@ export default function UserBookingPage() {
   const { user, profile } = useAuth();
   const { pushToast } = useToast();
   const cachedService = peekServiceCache(serviceId);
+  const initialLocation = normalizeLocationSelection({
+    locationText: profile?.address || "",
+    state: DEFAULT_SERVICE_STATE,
+    district: DEFAULT_SERVICE_DISTRICT,
+  });
   const [service, setService] = useState(cachedService || null);
   const [loading, setLoading] = useState(!cachedService);
   const [submitting, setSubmitting] = useState(false);
@@ -34,7 +42,11 @@ export default function UserBookingPage() {
     date: "",
     time: TIME_SLOTS[0],
     location: profile?.address || "",
-    city: "Bengaluru",
+    state: initialLocation.state,
+    district: initialLocation.district,
+    placeId: "",
+    latitude: "",
+    longitude: "",
     phone: profile?.phone || "",
     urgency: "standard",
     paymentMethod: "cash",
@@ -73,13 +85,38 @@ export default function UserBookingPage() {
     setForm((current) => ({
       ...current,
       location: current.location || profile?.address || "",
+      state: current.state || initialLocation.state,
+      district: current.district || initialLocation.district,
       phone: current.phone || profile?.phone || "",
     }));
-  }, [profile?.address, profile?.phone]);
+  }, [initialLocation.district, initialLocation.state, profile?.address, profile?.phone]);
 
   function handleChange(event) {
     const { name, value } = event.target;
     setForm((current) => ({ ...current, [name]: value }));
+  }
+
+  function handleStateChange(event) {
+    const nextState = event.target.value;
+    const nextDistrict = getDistrictsForState(nextState)[0] || "";
+    setForm((current) => ({
+      ...current,
+      state: nextState,
+      district: nextDistrict,
+    }));
+  }
+
+  function handlePlaceSelect(place) {
+    const nextSelection = extractGooglePlaceSelection(place);
+    setForm((current) => ({
+      ...current,
+      state: nextSelection.state || current.state,
+      district: nextSelection.district || current.district,
+      location: nextSelection.locationText,
+      placeId: nextSelection.placeId,
+      latitude: nextSelection.latitude,
+      longitude: nextSelection.longitude,
+    }));
   }
 
   async function handleSubmit(event) {
@@ -165,17 +202,50 @@ export default function UserBookingPage() {
             </select>
           </div>
           <div className="sm:col-span-2">
-            <label className="mb-2 block text-sm text-slate-300">Service location</label>
-            <input
-              name="location"
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="mb-2 block text-sm text-slate-300">State</label>
+                <select
+                  name="state"
+                  value={form.state}
+                  onChange={handleStateChange}
+                  className="input-shell w-full rounded-2xl px-4 py-3.5"
+                >
+                  <option value="Kerala">Kerala</option>
+                  <option value="Karnataka">Karnataka</option>
+                </select>
+              </div>
+              <div>
+                <label className="mb-2 block text-sm text-slate-300">District</label>
+                <select
+                  name="district"
+                  value={form.district}
+                  onChange={handleChange}
+                  className="input-shell w-full rounded-2xl px-4 py-3.5"
+                >
+                  {getDistrictsForState(form.state).map((district) => (
+                    <option key={district} value={district}>
+                      {district}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+          <div className="sm:col-span-2">
+            <GoogleMapsLocationInput
               value={form.location}
-              onChange={handleChange}
-              className="input-shell w-full rounded-2xl px-4 py-3.5"
-              placeholder="Apartment, street, landmark"
+              onChange={(value) =>
+                setForm((current) => ({
+                  ...current,
+                  location: value,
+                }))
+              }
+              onPlaceSelect={handlePlaceSelect}
               required
+              placeholder="Enter the apartment, street, or landmark"
             />
           </div>
-          <Field label="City" name="city" value={form.city} onChange={handleChange} placeholder="City" />
           <div>
             <label className="mb-2 block text-sm text-slate-300">Payment method</label>
             <select
@@ -240,7 +310,7 @@ export default function UserBookingPage() {
 
         <div className="panel rounded-[32px] p-6">
           <div className="space-y-4">
-            <InfoBlock icon={MapPin} title="Live assignment" text="Admin and workers will see this request immediately after confirmation." />
+            <InfoBlock icon={MapPin} title="Live assignment" text="Admin can match this booking to workers using your selected state, district, and exact location." />
             <InfoBlock icon={CreditCard} title="Flexible payment" text="Keep checkout simple with online or cash-on-service payment methods." />
             <InfoBlock
               icon={TicketPercent}

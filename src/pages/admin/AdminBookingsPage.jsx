@@ -7,6 +7,7 @@ import {
   listProfiles,
   peekAllBookingsCache,
   peekProfilesCache,
+  sortWorkersForBooking,
   subscribeToTable,
   updateBookingStatus,
 } from "../../services/platformService.js";
@@ -24,6 +25,7 @@ import {
   sortBookings,
 } from "../../utils/bookingFilters.js";
 import { Search, Trash2 } from "lucide-react";
+import { canWorkerTakeAssignments } from "../../utils/profile.js";
 
 const STATUS_OPTIONS = ["pending", "assigned", "in_progress", "cancelled"];
 
@@ -190,6 +192,8 @@ export default function AdminBookingsPage() {
     return <LoadingPanel rows={5} />;
   }
 
+  const availableWorkers = workers.filter((worker) => canWorkerTakeAssignments(worker));
+
   return (
     <div className="space-y-4">
       <div className="panel rounded-[30px] p-5">
@@ -268,6 +272,11 @@ export default function AdminBookingsPage() {
               </div>
               <p className="mt-3 text-sm text-slate-400">{formatDateTime(booking.service_date, booking.service_time)}</p>
               <p className="mt-3 text-sm leading-6 text-slate-500">{booking.address}</p>
+              {booking.serviceState || booking.serviceDistrict ? (
+                <p className="mt-2 text-sm text-slate-300">
+                  Service area: {[booking.serviceDistrict, booking.serviceState].filter(Boolean).join(", ")}
+                </p>
+              ) : null}
               {booking.requirementDetails ? (
                 <p className="mt-4 text-sm leading-6 text-slate-400">{booking.requirementDetails}</p>
               ) : null}
@@ -317,9 +326,12 @@ export default function AdminBookingsPage() {
                 className="input-shell w-full rounded-2xl px-4 py-3.5"
               >
                 <option value="">Assign worker</option>
-                {workers.map((worker) => (
+                {(availableWorkers.length ? sortWorkersForBooking(availableWorkers, booking) : sortWorkersForBooking(workers, booking)).map((worker) => (
                   <option key={worker.id} value={worker.id}>
                     {worker.name}
+                    {worker.coverage_summary && worker.coverage_summary !== "Coverage not configured"
+                      ? ` - ${worker.coverage_summary}`
+                      : ""}
                   </option>
                 ))}
               </select>

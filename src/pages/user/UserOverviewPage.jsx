@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Activity, BriefcaseBusiness, CalendarRange, Sparkles, TicketPercent } from "lucide-react";
+import { Activity, BriefcaseBusiness, CalendarRange, Clock3, Sparkles, TicketPercent } from "lucide-react";
 import {
   listServices,
   listUserBookings,
@@ -15,9 +15,10 @@ import StatCard from "../../components/StatCard.jsx";
 import ServiceCard from "../../components/ServiceCard.jsx";
 import StatusBadge from "../../components/StatusBadge.jsx";
 import { formatCompactNumber, formatCurrency, formatDateTime } from "../../utils/formatters.js";
+import { isPendingWorkerApplication, isRejectedWorkerApplication } from "../../utils/profile.js";
 
 export default function UserOverviewPage() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const cachedServices = peekServicesCache();
   const cachedBookings = peekUserBookingsCache(user?.id);
   const [services, setServices] = useState(cachedServices || []);
@@ -70,6 +71,9 @@ export default function UserOverviewPage() {
   const upcomingBookings = bookings.filter((booking) => booking.status !== "completed");
   const completedBookings = bookings.filter((booking) => booking.status === "completed");
   const assignedWorkerCount = bookings.filter((booking) => booking.assignedWorkerName).length;
+  const showWorkerApplicationBanner =
+    profile?.role === "user" &&
+    (isPendingWorkerApplication(profile) || isRejectedWorkerApplication(profile));
 
   if (loading) {
     return (
@@ -82,6 +86,35 @@ export default function UserOverviewPage() {
 
   return (
     <div className="space-y-6">
+      {showWorkerApplicationBanner ? (
+        <div className="panel rounded-[30px] border border-amber-200/15 bg-amber-300/8 p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="max-w-3xl">
+              <div className="inline-flex rounded-2xl bg-amber-300/12 p-3 text-amber-100">
+                <Clock3 className="size-5" />
+              </div>
+              <h2 className="mt-4 text-xl font-semibold text-white">
+                {isPendingWorkerApplication(profile) ? "Worker application pending" : "Worker application needs updates"}
+              </h2>
+              <p className="mt-3 text-sm leading-7 text-slate-300">
+                {isPendingWorkerApplication(profile)
+                  ? "Your worker request is waiting for admin approval. Once approved, this account will switch to the worker dashboard in real time."
+                  : profile?.worker_application_note || "Admin asked for changes before activating worker access."}
+              </p>
+              {profile?.coverage_summary && profile.coverage_summary !== "Coverage not configured" ? (
+                <p className="mt-3 text-sm text-amber-100">Coverage selected: {profile.coverage_summary}</p>
+              ) : null}
+            </div>
+            <Link
+              to="/user/profile"
+              className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/6 px-4 py-3 text-sm font-medium text-white transition hover:bg-white/10"
+            >
+              Review profile
+            </Link>
+          </div>
+        </div>
+      ) : null}
+
       <div className="dashboard-grid">
         <StatCard
           icon={CalendarRange}

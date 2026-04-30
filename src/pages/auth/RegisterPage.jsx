@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, CheckCircle2, ShieldCheck } from "lucide-react";
+import { AlertCircle, ArrowRight, CheckCircle2, ShieldCheck } from "lucide-react";
 import { motion as Motion } from "framer-motion";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { useToast } from "../../context/ToastContext.jsx";
@@ -10,10 +10,17 @@ import {
   getEmailRuleText,
 } from "../../utils/email.js";
 import { getDashboardPath } from "../../utils/routes.js";
+import { DEFAULT_SERVICE_DISTRICT, DEFAULT_SERVICE_STATE, getDistrictsForState } from "../../data/indiaLocations.js";
+import { extractGooglePlaceSelection } from "../../utils/location.js";
+import WorkerCoverageFields from "../../components/WorkerCoverageFields.jsx";
 
 const ROLES = [
   { value: "user", label: "User", description: "Book services, track updates, and manage bookings." },
-  { value: "worker", label: "Worker", description: "Accept assignments, update job progress, manage profile." },
+  {
+    value: "worker",
+    label: "Worker",
+    description: "Submit a worker application, set your service area, and activate your dashboard after admin approval.",
+  },
 ];
 
 export default function RegisterPage() {
@@ -27,6 +34,12 @@ export default function RegisterPage() {
     address: "",
     password: "",
     role: "user",
+    workerServiceState: DEFAULT_SERVICE_STATE,
+    workerServiceDistricts: [DEFAULT_SERVICE_DISTRICT],
+    workerServiceLocation: "",
+    workerServicePlaceId: "",
+    workerServiceLatitude: "",
+    workerServiceLongitude: "",
   });
   const [avatarFile, setAvatarFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -36,8 +49,67 @@ export default function RegisterPage() {
     setForm((current) => ({ ...current, [name]: value }));
   }
 
+  function handleRoleSelect(nextRole) {
+    setForm((current) => ({
+      ...current,
+      role: nextRole,
+    }));
+  }
+
+  function handleWorkerStateChange(nextState) {
+    const nextDistricts = getDistrictsForState(nextState);
+    setForm((current) => ({
+      ...current,
+      workerServiceState: nextState,
+      workerServiceDistricts: current.workerServiceDistricts.filter((district) => nextDistricts.includes(district)).length
+        ? current.workerServiceDistricts.filter((district) => nextDistricts.includes(district))
+        : nextDistricts.slice(0, 1),
+    }));
+  }
+
+  function handleWorkerDistrictToggle(nextDistrict) {
+    setForm((current) => {
+      const alreadySelected = current.workerServiceDistricts.includes(nextDistrict);
+      if (alreadySelected && current.workerServiceDistricts.length === 1) {
+        return current;
+      }
+
+      return {
+        ...current,
+        workerServiceDistricts: alreadySelected
+          ? current.workerServiceDistricts.filter((district) => district !== nextDistrict)
+          : [...current.workerServiceDistricts, nextDistrict],
+      };
+    });
+  }
+
+  function handleWorkerPlaceSelect(place) {
+    const nextSelection = extractGooglePlaceSelection(place);
+    setForm((current) => ({
+      ...current,
+      workerServiceState: nextSelection.state || current.workerServiceState,
+      workerServiceDistricts: nextSelection.districts.length
+        ? nextSelection.districts
+        : current.workerServiceDistricts,
+      workerServiceLocation: nextSelection.locationText,
+      workerServicePlaceId: nextSelection.placeId,
+      workerServiceLatitude: nextSelection.latitude,
+      workerServiceLongitude: nextSelection.longitude,
+    }));
+  }
+
   async function handleSubmit(event) {
     event.preventDefault();
+
+    if (form.role === "worker" && !form.workerServiceDistricts.length) {
+      pushToast({
+        title: "Select a service district",
+        message: "Choose at least one district where the worker can take bookings.",
+        type: "error",
+      });
+      return;
+    }
+
     setSubmitting(true);
 
     try {
@@ -45,15 +117,21 @@ export default function RegisterPage() {
 
       if (result?.requiresEmailConfirmation) {
         pushToast({
-          title: "Account created",
-          message: "Confirm your email first, then sign in to open the user dashboard.",
+          title: form.role === "worker" ? "Application account created" : "Account created",
+          message:
+            form.role === "worker"
+              ? "Confirm your email first, then sign in to track your worker application."
+              : "Confirm your email first, then sign in to open the user dashboard.",
           type: "success",
         });
         navigate("/login", { replace: true });
       } else {
         pushToast({
-          title: "Account created",
-          message: "Your profile, avatar, and dashboard are ready.",
+          title: form.role === "worker" ? "Worker application submitted" : "Account created",
+          message:
+            form.role === "worker"
+              ? "Your request is saved with coverage details and will activate after admin approval."
+              : "Your profile, avatar, and dashboard are ready.",
           type: "success",
         });
         navigate(getDashboardPath(result?.profile?.role), { replace: true });
@@ -104,7 +182,7 @@ export default function RegisterPage() {
               <button
                 key={role.value}
                 type="button"
-                onClick={() => setForm((current) => ({ ...current, role: role.value }))}
+                onClick={() => handleRoleSelect(role.value)}
                 className={`w-full rounded-3xl border p-4 text-left transition ${
                   form.role === role.value
                     ? "border-amber-200/20 bg-amber-300/8"
@@ -160,6 +238,24 @@ export default function RegisterPage() {
                 placeholder="Primary service address"
               />
             </div>
+            {form.role === "worker" ? (
+              <div className="sm:col-span-2">
+                <WorkerCoverageFields
+                  state={form.workerServiceState}
+                  districts={form.workerServiceDistricts}
+                  locationText={form.workerServiceLocation}
+                  onStateChange={handleWorkerStateChange}
+                  onDistrictToggle={handleWorkerDistrictToggle}
+                  onLocationTextChange={(value) =>
+                    setForm((current) => ({
+                      ...current,
+                      workerServiceLocation: value,
+                    }))
+                  }
+                  onPlaceSelect={handleWorkerPlaceSelect}
+                />
+              </div>
+            ) : null}
             <div className="sm:col-span-2">
               <label className="mb-2 block text-sm text-slate-300">Profile photo</label>
               <input
@@ -169,6 +265,21 @@ export default function RegisterPage() {
                 className="input-shell w-full rounded-2xl px-4 py-3.5 file:mr-4 file:rounded-xl file:border-0 file:bg-amber-300/10 file:px-3 file:py-2 file:text-sm file:font-medium file:text-amber-100"
               />
             </div>
+            {form.role === "worker" ? (
+              <div className="sm:col-span-2 rounded-[28px] border border-amber-200/15 bg-amber-300/8 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-2xl bg-amber-300/12 p-3 text-amber-100">
+                    <AlertCircle className="size-5" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-white">Approval workflow</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-300">
+                      New worker signups stay in application mode until an admin approves the request. Existing workers are not affected.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
             <div className="sm:col-span-2">
               <button

@@ -2,6 +2,8 @@ import { supabase } from "./supabase.js";
 import { findServiceBlueprint, SERVICE_BLUEPRINTS } from "../data/serviceCatalog.js";
 import { appendTimeline, parseBookingMeta, serializeBookingMeta } from "../utils/bookingMeta.js";
 import { normalizeRole } from "../utils/roles.js";
+import { buildLocationLabel, normalizeLocationSelection } from "../utils/location.js";
+import { canWorkerTakeAssignments, normalizeProfileRecord } from "../utils/profile.js";
 
 let servicesCache;
 let adminServicesCache;
@@ -225,7 +227,13 @@ function normalizeBooking(record) {
     rewardCoinsEarned: 0,
     requirementDetails: meta?.requirementDetails || meta?.details || "",
     urgency: meta?.urgency || "standard",
-    location: meta?.location || record?.address || "",
+    location: meta?.location || meta?.locationText || record?.address || "",
+    locationText: meta?.locationText || meta?.location || record?.address || "",
+    serviceState: meta?.serviceState || "",
+    serviceDistrict: meta?.serviceDistrict || "",
+    locationPlaceId: meta?.locationPlaceId || "",
+    locationLatitude: meta?.locationLatitude ?? "",
+    locationLongitude: meta?.locationLongitude ?? "",
     serviceSlug: meta?.serviceSlug || blueprint?.slug || null,
     assignedWorker,
     assignedWorkerId: assignedWorker?.id || record?.technician_id || null,
@@ -391,10 +399,7 @@ export async function listProfiles(role) {
   const { data, error } = await supabase.from("profiles").select("*").order("name", { ascending: true });
   if (error) throw new Error(error.message);
 
-  const normalizedProfiles = (data || []).map((profile) => ({
-    ...profile,
-    role: normalizeRole(profile.role),
-  }));
+  const normalizedProfiles = (data || []).map((profile) => normalizeProfileRecord(profile));
 
   if (!role) {
     storeProfilesCache(null, normalizedProfiles);
@@ -411,20 +416,17 @@ export async function updateProfileRecord(userId, updates) {
   const nextRole = updates.role ? normalizeRole(updates.role) : undefined;
   const { data, error } = await supabase
     .from("profiles")
-    .upsert(
-      {
-        id: userId,
-        ...updates,
-        ...(nextRole ? { role: nextRole } : {}),
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "id" }
-    )
+    .update({
+      ...updates,
+      ...(nextRole ? { role: nextRole } : {}),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", userId)
     .select()
     .single();
 
   if (error) throw new Error(error.message);
-  return data;
+  return normalizeProfileRecord(data);
 }
 
 export async function createBooking({ userId, service, profile, form }) {
@@ -433,6 +435,15 @@ export async function createBooking({ userId, service, profile, form }) {
   const discountValue = getCouponDiscountValue(selectedService, form.promoCode);
   const finalPrice = Math.max(basePrice - discountValue, 0);
   const normalizedPromoCode = discountValue ? normalizeCouponCode(form.promoCode) : null;
+  const location = normalizeLocationSelection({
+    state: form.state,
+    district: form.district,
+    locationText: form.location,
+    placeId: form.placeId,
+    latitude: form.latitude,
+    longitude: form.longitude,
+  });
+  const addressLabel = buildLocationLabel(location.state, location.district, location.locationText);
 
   let meta = {
     serviceSlug: selectedService?.slug || null,
@@ -443,8 +454,14 @@ export async function createBooking({ userId, service, profile, form }) {
     discountValue,
     rewardCoinsRedeemed: 0,
     rewardCoinsEarned: 0,
-    location: form.location,
-    city: form.city,
+    location: addressLabel,
+    locationText: location.locationText,
+    locationPlaceId: location.placeId,
+    locationLatitude: location.latitude || null,
+    locationLongitude: location.longitude || null,
+    serviceState: location.state,
+    serviceDistrict: location.district,
+    city: form.city || location.district,
     customerName: profile?.name || "",
     customerPhone: form.phone || profile?.phone || "",
   };
@@ -461,7 +478,7 @@ export async function createBooking({ userId, service, profile, form }) {
     service: selectedService?.name || service?.name || "Service",
     service_date: form.date,
     service_time: form.time,
-    address: form.location,
+    address: addressLabel,
     status: "pending",
     price: finalPrice,
     notes: serializeBookingMeta(meta),
@@ -660,6 +677,8 @@ export async function assignWorkerToBooking(bookingId, workerId, adminLabel = "a
           id: worker.id,
           name: worker.name,
           phone: worker.phone || "",
+          state: worker.worker_service_state || "",
+          districts: worker.worker_service_districts || [],
           assignedAt: new Date().toISOString(),
         }
       : null,
@@ -728,6 +747,104 @@ export async function assignWorkerToBooking(bookingId, workerId, adminLabel = "a
   }
 
   return normalizeBooking(data);
+}
+
+export function matchesWorkerCoverage(worker, booking) {
+  if (!worker?.worker_service_state || !booking?.serviceState) {
+    return false;
+  }
+
+  if (worker.worker_service_state !== booking.serviceState) {
+    return false;
+  }
+
+  return Array.isArray(worker.worker_service_districts)
+    ? worker.worker_service_districts.includes(booking.serviceDistrict)
+    : false;
+}
+
+export function sortWorkersForBooking(workers, booking) {
+  return [...(workers || [])].sort((first, second) => {
+    const firstScore = getWorkerBookingScore(first, booking);
+    const secondScore = getWorkerBookingScore(second, booking);
+
+    if (secondScore !== firstScore) {
+      return secondScore - firstScore;
+    }
+
+    return String(first?.name || "").localeCompare(String(second?.name || ""));
+  });
+}
+
+function getWorkerBookingScore(worker, booking) {
+  let score = 0;
+
+  if (canWorkerTakeAssignments(worker)) {
+    score += 100;
+  }
+
+  if (matchesWorkerCoverage(worker, booking)) {
+    score += 60;
+  } else if (worker?.worker_service_state && worker.worker_service_state === booking?.serviceState) {
+    score += 25;
+  }
+
+  if (Array.isArray(worker?.worker_service_districts) && worker.worker_service_districts.length) {
+    score += 10;
+  }
+
+  return score;
+}
+
+export async function reviewWorkerApplication(userId, nextStatus, adminLabel = "Admin", adminNote = "") {
+  const requestedStatus = String(nextStatus || "").trim().toLowerCase();
+  if (!["approved", "rejected"].includes(requestedStatus)) {
+    throw new Error("Worker application status must be approved or rejected.");
+  }
+
+  const { data: existingProfile, error: loadError } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", userId)
+    .single();
+
+  if (loadError) {
+    throw new Error(loadError.message);
+  }
+
+  const approved = requestedStatus === "approved";
+  const reviewedAt = new Date().toISOString();
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({
+      role: approved ? "worker" : "user",
+      worker_application_status: requestedStatus,
+      worker_application_note:
+        adminNote ||
+        (approved
+          ? `Approved by ${adminLabel}.`
+          : `Reviewed by ${adminLabel}. Update the application details and reapply.`),
+      worker_reviewed_at: reviewedAt,
+      is_accepting_jobs: approved ? existingProfile?.is_accepting_jobs !== false : false,
+      updated_at: reviewedAt,
+    })
+    .eq("id", userId)
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+
+  await safeNotificationInsert({
+    userId,
+    title: approved ? "Worker application approved" : "Worker application update required",
+    message: approved
+      ? `${adminLabel} approved your worker request. Your worker dashboard is now active.`
+      : adminNote || `${adminLabel} reviewed your worker request. Update your coverage details and apply again.`,
+    type: approved ? "success" : "info",
+  });
+
+  return normalizeProfileRecord(data);
 }
 
 export async function listNotifications(userId) {
